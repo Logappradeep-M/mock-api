@@ -425,6 +425,7 @@ const VM_COLUMNS = [
   { key: 'osType', label: 'Operating System', render: (v) => osText(v) },
   { key: 'environment', label: 'Environment' },
   { key: 'status', label: 'Status' },
+  { key: null, label: 'Installed Software', render: (v) => softwareCell(v.installed_software) },
   { key: '_updated_at', label: 'Updated', render: (v) => h('span', { class: 'tertiary', title: v._updated_at }, relTime(v._updated_at)) },
 ];
 
@@ -515,6 +516,13 @@ function hostnameCell(v) {
   const m = String(v).match(/^(\s*)(.*?)(\s*)$/);
   return [m[1] ? h('span', { class: 'ws', title: 'Leading whitespace' }, '␣'.repeat(m[1].length)) : null, m[2],
     m[3] ? h('span', { class: 'ws', title: 'Trailing whitespace' }, '␣'.repeat(m[3].length)) : null];
+}
+function softwareCell(list) {
+  if (!Array.isArray(list) || !list.length) return h('span', { class: 'empty-cell' }, '—');
+  const names = list.map((x) => [x?.name, x?.version].filter(Boolean).join(' ')).filter(Boolean);
+  const shown = [...new Set(list.map((x) => x?.name).filter(Boolean))].slice(0, 2).join(', ');
+  return h('span', { class: 'sw-cell', title: names.join('\n') },
+    h('span', { class: 'sw-count' }, String(list.length)), shown, list.length > 2 ? '…' : '');
 }
 function osText(vm) {
   const parts = [vm.osName || vm.osType, vm.osVersion].filter(Boolean);

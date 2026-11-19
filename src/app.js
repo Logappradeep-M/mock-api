@@ -472,7 +472,9 @@ export async function createApp(config, { log = console.log, store } = {}) {
         const saved = await store.insert(name, idField, doc);
         return json(res, 201, toPublic(saved), { ...headers, Location: `/api/v1/${name}/${encodeURIComponent(doc[idField])}` });
       }
-      throw new HttpError(405, 'method_not_allowed', 'Use GET or POST', { Allow: 'GET, POST' });
+      throw new HttpError(405, 'method_not_allowed',
+        `${req.method} isn't allowed on the collection itself. Use GET or POST here; to change or delete a record use /api/v1/${name}/<id>. To delete the whole collection, use its settings in the UI or DELETE /__admin/resources/${name}.`,
+        { Allow: 'GET, POST' });
     }
 
     const current = await store.get(name, id);
@@ -762,14 +764,31 @@ export async function createApp(config, { log = console.log, store } = {}) {
   }
 
   // ---- Static UI ---------------------------------------------------------------
-  async function serveStatic(res, pathname) {
+  // index.html references app.js / app.css with ?v=<content hash>, so every change
+  // gets a new URL. That keeps CDNs (e.g. Cloudflare, which caches .js/.css for
+  // hours) and browsers from serving a stale UI after a deploy. Versioned asset
+  // URLs are cached for a year; the HTML itself is never cached.
+  const assetVersion = async (file) =>
+    crypto.createHash('sha256').update(await fs.readFile(path.join(PUBLIC_DIR, file))).digest('hex').slice(0, 12);
+
+  async function serveStatic(res, pathname, search) {
     const [file, type] = STATIC[pathname];
     try {
-      const body = await fs.readFile(path.join(PUBLIC_DIR, file));
+      let body = await fs.readFile(path.join(PUBLIC_DIR, file));
+      let cache = 'no-cache';
+      if (file === 'index.html') {
+        const [js, css] = await Promise.all([assetVersion('app.js'), assetVersion('app.css')]);
+        body = Buffer.from(body.toString('utf8')
+          .replace('src="/app.js"', `src="/app.js?v=${js}"`)
+          .replace('href="/app.css"', `href="/app.css?v=${css}"`));
+        cache = 'no-store';
+      } else if (/[?&]v=[0-9a-f]{12}\b/.test(search || '')) {
+        cache = 'public, max-age=31536000, immutable';
+      }
       res.writeHead(200, {
         'Content-Type': type,
         'Content-Length': body.length,
-        'Cache-Control': 'no-cache',
+        'Cache-Control': cache,
         'X-Content-Type-Options': 'nosniff',
         ...(file.endsWith('.html') ? { 'Content-Security-Policy': "default-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'" } : {}),
       });
@@ -803,7 +822,7 @@ export async function createApp(config, { log = console.log, store } = {}) {
     });
 
     try {
-      if (req.method === 'GET' && STATIC[url.pathname]) return await serveStatic(res, url.pathname);
+      if (req.method === 'GET' && STATIC[url.pathname]) return await serveStatic(res, url.pathname, url.search);
       if (url.pathname === '/health' && req.method === 'GET') {
         return json(res, 200, { status: 'ok', storage: store.kind, time: new Date().toISOString() });
       }
