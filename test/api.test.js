@@ -129,7 +129,7 @@ test('vms: updated_since filters, and empty result still has total_pages=1', asy
   assert.deepEqual(delta.vms.map((v) => v.vm_id).sort(), ['vm-010', 'vm-020']);
 });
 
-test('parseUpdatedSince accepts ISO, date-only and GlideDateTime formats', () => {
+test('parseUpdatedSince accepts ISO, date-only and space-separated formats', () => {
   assert.equal(parseUpdatedSince('2026-11-18T02:00:00Z').toISOString(), '2026-11-18T02:00:00.000Z');
   assert.equal(parseUpdatedSince('2026-11-18').toISOString(), '2026-11-18T00:00:00.000Z');
   assert.equal(parseUpdatedSince('2026-11-18 02:00:00').toISOString(), '2026-11-18T02:00:00.000Z');
@@ -201,7 +201,7 @@ test('no admin bypass: management API is open, private API always needs a creden
   assert.equal((await fetch(`${base}/api/v1/vms`, { headers: { 'X-Admin-Key': 'anything' } })).status, 401);
 });
 
-test('dataset contains every dirty-data case the integration must handle', async () => {
+test('dataset contains every dirty-data case a client must handle', async () => {
   const { vms: all } = await (await admin('/vms')).json();
   const ipv4 = /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
   const fam = (v) => (v.guest_os?.family || '').toLowerCase();

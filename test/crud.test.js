@@ -137,7 +137,7 @@ test('custom resource: create, public access, CRUD, query params', async () => {
   assert.equal((await call('GET', '/api/v1/users', undefined, A)).status, 404);
 });
 
-test('import replace, bad names, builtin protection', async () => {
+test('import replace and bad names', async () => {
   await call('POST', '/__admin/resources', { name: 'cost_centers', id_field: 'code' });
   let r = await call('POST', '/__admin/resources/cost_centers/import', { mode: 'replace', records: [{ code: 'CC100' }, { code: 'CC200' }] });
   assert.equal(r.body.imported, 2);
@@ -148,7 +148,6 @@ test('import replace, bad names, builtin protection', async () => {
 
   assert.equal((await call('POST', '/__admin/resources', { name: '1bad name' })).status, 400);
   assert.equal((await call('POST', '/__admin/resources', { name: 'cost_centers' })).status, 409);
-  assert.equal((await call('DELETE', '/__admin/resources/vms')).status, 400);
 });
 
 test('reset restores seeded VMs', async () => {
@@ -157,4 +156,28 @@ test('reset restores seeded VMs', async () => {
   assert.equal((await call('GET', '/api/v1/vms/temp-1')).status, 404);
   const r = await call('GET', '/api/v1/vms?limit=0');
   assert.equal(r.body.total, 50);
+});
+
+test('vms can be deleted, stays deleted after a restart, and can be restored', async () => {
+  // Credentials that reference vms lose that grant.
+  const key = await (await fetch(`${base}/__admin/credentials`, {
+    method: 'POST', headers: A,
+    body: JSON.stringify({ type: 'api_key', grants: [{ resource: 'vms', permissions: ['read'] }, { resource: '*', permissions: ['read'] }] }),
+  })).json();
+
+  assert.equal((await call('DELETE', '/__admin/resources/vms')).status, 200);
+  assert.equal((await call('GET', '/api/v1/vms', undefined, A)).status, 404);
+  const creds = (await call('GET', '/__admin/credentials')).body.credentials;
+  assert.deepEqual(creds.find((c) => c.id === key.id).grants, [{ resource: '*', permissions: ['read'] }]);
+
+  // A restart (new app on the same store) must not bring it back.
+  const again = await createApp(config, { log: () => {}, store });
+  assert.equal(await store.getResource('vms'), null);
+  again.server.close();
+
+  // Restore from Test Controls.
+  assert.equal((await call('POST', '/__admin/samples/vms', {})).status, 200);
+  const r = await call('GET', '/api/v1/vms?limit=0');
+  assert.equal(r.body.total, 50);
+  assert.equal(await store.getMeta('vms_sample_deleted'), null);
 });

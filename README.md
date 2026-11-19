@@ -2,7 +2,7 @@
 
 Build mock REST APIs from a web UI, in the spirit of [mockapi.io](https://mockapi.io) and [dummyjson.com](https://dummyjson.com). Create collections, edit records, and protect them with OAuth 2.0 clients, API keys or Basic logins. Whatever you save in the UI is what the API returns.
 
-It ships with a `vms` collection that stands in for `https://api.example-cloud.com`, so you can build and test the ServiceNow CMDB integration (OAuth 2.0 Client Credentials → paginated VM inventory → IRE). It uses the same paths, auth flow and response shape as the real API.
+It ships with a sample `vms` collection: 450 cloud VMs, including deliberately messy records, so there's something realistic to call right away.
 
 ## Run
 
@@ -10,11 +10,11 @@ It ships with a `vms` collection that stands in for `https://api.example-cloud.c
 npm install
 cp .env.example .env      # then set MONGODB_URI
 npm start                 # API and UI on http://localhost:3000
-npm test                  # 31 unit tests
+npm test                  # unit tests
 npm run test:e2e          # end-to-end test against a real server process (see below)
 ```
 
-Open `http://localhost:3000`. The UI is open to everyone, like mockapi.io; there is no admin key. No credentials exist until you create them on the **Credentials** page. That includes the OAuth client ServiceNow uses.
+Open `http://localhost:3000`. The UI is open to everyone, like mockapi.io; there is no admin key. No credentials exist until you create them on the **Credentials** page.
 
 ### MongoDB
 
@@ -34,10 +34,9 @@ To run the CRUD and credential tests against MongoDB: `TEST_MONGODB_URI=<your ur
 ## The UI
 
 - **Resources**: a sortable, searchable table for each resource. VMs get a form editor (identity, guest OS, hardware, ownership, installed software) and a JSON tab. Other resources get a JSON editor. You can create, duplicate and delete records, and undo a delete.
-- **ServiceNow result preview**: every VM shows what the integration should do with it. That's either Linux server, Windows server, VM only, or Rejected with the reason, plus notes on name trimming, status mapping, RAM conversion and duplicate software. It updates as you type, so you can build exact test cases.
 - **New Resource**: create any collection, such as `users` or `cost_centers`, with its own ID field. Choose whether API callers need an OAuth token or can use it publicly, like mockapi.io. You can add starting records, or import a JSON array later.
 - **Credentials**: create API keys, Basic logins and OAuth clients. Give each one access to one, several or all collections, with read and/or write, custom OAuth scope names, an expiry and a token lifetime. Filter by type or collection, see when each was last used, turn them off and on, edit, rotate or revoke them. Secrets are shown once, with copy buttons and ready-made headers.
-- **Connection**: the token URL, endpoint URLs, curl examples and ServiceNow setup steps.
+- **Connection**: the token URL, endpoint URLs and curl examples.
 - **Test Controls**: force 401, 429 or 503 responses, add latency, revoke tokens, mark VMs as changed, or reset everything.
 - **Request Log**: live view of API calls, showing who called (OAuth, public or the UI), the status code and duration.
 
@@ -110,40 +109,40 @@ Errors follow RFC 6749: `401 invalid_client`, `400 unsupported_grant_type`, `400
 { "page": 1, "total_pages": 3, "vms": [ … ] }
 ```
 
-- **`updated_since`** (optional): accepts ISO 8601 (`2026-11-18T02:00:00Z`, `+05:30` offsets), a date only (`2026-11-18`), or the ServiceNow `GlideDateTime.getValue()` format (`2026-11-18 02:00:00`, read as UTC). The filter is inclusive (`>=`). An invalid value returns `400`.
+- **`updated_since`** (optional): accepts ISO 8601 (`2026-11-18T02:00:00Z`, `+05:30` offsets), a date only (`2026-11-18`), or a space-separated date-time (`2026-11-18 02:00:00`, read as UTC). The filter is inclusive (`>=`). An invalid value returns `400`.
 - **`page`**: starts at 1. A page past the end returns `vms: []`.
 - **`page_size`**: defaults to 200 and is capped at 200.
-- **`total_pages`** is always at least 1, so a loop that stops at `page == total_pages` ends even when the result is empty. You still need the max-page cap in ServiceNow.
+- **`total_pages`** is always at least 1, so a loop that stops at `page == total_pages` ends even when the result is empty.
 - Response headers: `X-Total-Count`, `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.
 
-| Status | When | Integration behaviour to test |
+| Status | When | What a client should do |
 |---|---|---|
-| 401 + `WWW-Authenticate` | Token missing, unknown, revoked or expired | Get a new token and retry once |
-| 403 `insufficient_scope` | Token lacks `inventory.read` | Fail the run |
+| 401 + `WWW-Authenticate` | Credential missing, unknown, disabled, expired or revoked; token expired | Get a new token and retry once |
+| 403 `insufficient_scope` | The credential has no read (or write) access to this collection | Stop and report the error |
 | 429 + `Retry-After` | Over `RATE_LIMIT_MAX` requests per window | Wait `Retry-After` seconds, then retry |
-| 503 + `Retry-After` | Only when triggered through chaos controls | Retry or fail the run (don't advance the delta property) |
-| 400 | Bad `page`, `page_size` or `updated_since` | Fail the run |
+| 503 + `Retry-After` | Only when triggered from Test Controls | Retry later |
+| 400 | Bad `page`, `page_size` or `updated_since` | Fix the request |
 
-## Dataset
+## Sample data
 
-There are 450 VMs (3 pages at 200 per page), generated from `DATA_SEED`, so every restart produces the same data. The first four records (`vm-001` to `vm-004`) are exactly the sample from the requirement. The generated VMs deliberately include each case the mapping rules must handle:
+The `vms` collection has 450 VMs (3 pages at 200 per page), generated from `DATA_SEED`, so every restart produces the same data. The first four records (`vm-001` to `vm-004`) are hand-written examples. The rest deliberately include messy values, useful for testing how a client cleans and validates data:
 
-| Rule | Cases in the data |
+| Field | Messy values in the data |
 |---|---|
-| Hostname trim/lowercase/reject | `" WEB-PROD-01 "`, upper-case names, `""`, `"   "`, missing hostname, duplicate hostnames on different `vm_id` |
-| IPv4 validation | `999.1.1.1`, `256.10.0.1`, `10.0.0`, `10.0.0.1.5`, `not-an-ip`, `fe80::1`, empty |
-| OS class routing | Linux and Windows family in mixed case, unknown families (`FreeBSD`, `Solaris`, empty, missing), `guest_os` missing |
-| OS normalization | `Win Server 2022`, `Win2019`, `Microsoft Windows Server 2019 Datacenter`, `RHEL` vs `Red Hat Enterprise Linux`, `ubuntu` vs `Ubuntu` |
-| CPU manufacturer | `Intel Corporation`, `GenuineIntel`, `intel`, `AuthenticAMD`, `AMD`, `Advanced Micro Devices, Inc.` |
-| Manufacturer / model lookups | `VMware, Inc.`, `Amazon EC2`, `Microsoft Corporation`, `Google`, upper-case variants, missing |
-| Environment lookup table | `Production`/`Prod`/`PROD`, `Development`/`Dev`, `QA`, `Test`, `UAT`, `Staging`, `stage`, and unmapped `DR`/`Sandbox` |
-| `owner_email` → sys_user | `alice@` … `erin@acme.com`, upper-case and padded variants, unknown users |
-| Cost center lookup | `CC100`–`CC400`, unknown `CC999`, lower-case `cc100`, missing |
-| Status mapping | `running`, `stopped`, and unmapped `terminated`/`suspended`/`pending` |
-| RAM conversion | Includes fractional `0.5` GB |
-| Software upsert idempotency | The same software listed twice in one VM's payload |
+| `hostname` | `" WEB-PROD-01 "`, upper-case names, `""`, `"   "`, missing, duplicates on different `vm_id` |
+| `ip_address` | `999.1.1.1`, `256.10.0.1`, `10.0.0`, `10.0.0.1.5`, `not-an-ip`, `fe80::1`, empty |
+| `guest_os.family` | Linux and Windows in mixed case, other families (`FreeBSD`, `Solaris`), empty, missing |
+| `guest_os.name` | `Win Server 2022`, `Win2019`, `Microsoft Windows Server 2019 Datacenter`, `RHEL` vs `Red Hat Enterprise Linux`, `ubuntu` vs `Ubuntu` |
+| `cpu_manufacturer` | `Intel Corporation`, `GenuineIntel`, `intel`, `AuthenticAMD`, `AMD`, `Advanced Micro Devices, Inc.` |
+| `manufacturer` / `model` | `VMware, Inc.`, `Amazon EC2`, `Microsoft Corporation`, `Google`, upper-case variants, missing |
+| `environment` | `Production`/`Prod`/`PROD`, `Development`/`Dev`, `QA`, `Test`, `UAT`, `Staging`, `stage`, `DR`, `Sandbox` |
+| `owner_email` | `alice@` … `erin@acme.com`, upper-case and padded variants, unknown users |
+| `cost_center` | `CC100`–`CC400`, `CC999`, lower-case `cc100`, missing |
+| `status` | `running`, `stopped`, `terminated`, `suspended`, `pending` |
+| `ram_gb` | Includes fractional `0.5` |
+| `installed_software` | Sometimes lists the same item twice |
 
-To match the sample data, create users `alice@acme.com` to `erin@acme.com` in `sys_user` and cost centers `CC100` to `CC400` in `cmn_cost_center`. Leave `unknown@acme.com` and `CC999` out so the "not found → log warning" path runs.
+You can delete the `vms` collection like any other; it stays deleted after a restart. **Test Controls → Restore Sample VMs** brings it back.
 
 ## Test controls (`/__admin`)
 
@@ -152,7 +151,7 @@ To match the sample data, create users `alice@acme.com` to `erin@acme.com` in `s
 curl -X POST localhost:3000/__admin/chaos -H 'Content-Type: application/json' -d '{"unauthorized_next":1}'
 # Next 2 calls get 429 Retry-After: 2 → test back-off
 curl -X POST localhost:3000/__admin/chaos -H 'Content-Type: application/json' -d '{"rate_limit_next":2}'
-# Next call gets 503 → test that last_successful_run is NOT advanced
+# Next call gets 503 Service Unavailable
 curl -X POST localhost:3000/__admin/chaos -H 'Content-Type: application/json' -d '{"server_error_next":1}'
 # Add latency to every call (ms)
 curl -X POST localhost:3000/__admin/chaos -H 'Content-Type: application/json' -d '{"delay_ms":1500}'
@@ -171,25 +170,6 @@ curl -X POST localhost:3000/__admin/reset
 Set `TOKEN_TTL_SECONDS=60` to test a real token expiry partway through a run. 
 
 Other admin routes, which the UI uses: `GET /__admin/info`, `GET|POST /__admin/resources`, `PATCH|DELETE /__admin/resources/<name>`, `POST /__admin/resources/<name>/import` (body `{ "records": [...], "mode": "append" | "replace" }`), `POST /__admin/resources/<name>/reset`.
-
-## Connecting ServiceNow
-
-A ServiceNow cloud instance can't reach `localhost`. Use one of these:
-
-- **Tunnel**: `cloudflared tunnel --url http://localhost:3000` or `ngrok http 3000`, then use the HTTPS URL it prints as the base URL.
-- **MID Server** on the same network as this mock: set the connection to use the MID Server, and `http://<host>:3000` works.
-- **Deploy** it to any Node host (Render, Fly.io, a VM).
-
-Configuration in ServiceNow:
-
-1. In this mock's UI, open **Credentials → New Credential → OAuth Client**. Give it **vms** with **Read** and the custom scope `inventory.read`, then copy the client ID and secret. The secret is shown only once.
-2. **System OAuth → Application Registry → New → Connect to a third party OAuth Provider**
-   - Client ID / Client Secret: the values from step 1
-   - Default Grant type: `Client Credentials`
-   - Token URL: `<base>/oauth/token`
-   - On the OAuth Entity Profile, add the scope `inventory.read`
-3. **Connections & Credentials → Connection & Credential Aliases**: create an HTTP alias. Then create an HTTP(s) Connection with `<base>` as the base URL, and an **OAuth 2.0 credential** that points to the profile from step 2. The secret is stored only in the credential record, never in script.
-4. **Data Stream action** (Flow Designer / IntegrationHub): REST step `GET /api/v1/vms` with `updated_since`, `page` and `page_size=200`. Use a pagination script that stops when `page == total_pages`, and set a max-page cap. Split items on `$.vms`.
 
 ## Configuration (`.env`)
 
@@ -212,8 +192,8 @@ There are no credentials in `.env`. API keys, Basic logins and OAuth clients liv
 
 1. The UI is served, and nothing exposes an admin key or built-in client.
 2. Private collections refuse anonymous calls, including ones that send an admin header.
-3. Creating a ServiceNow OAuth client (vms read, scope `inventory.read`), and the token endpoint's success and error cases.
-4. A nightly job written from the integration requirements: a full load (3 pages, 450 VMs), then a delta run with a GlideDateTime `updated_since` that picks up exactly the VMs edited or created in the UI.
-5. 401 → token refresh and one retry; 429 → back off for `Retry-After`; 503 → the run fails and `last_successful_run` isn't advanced.
+3. Creating an OAuth client in the UI (vms read, custom scope `inventory.read`), and the token endpoint's success and error cases.
+4. A nightly sync client: a full load (3 pages, 450 VMs), then a delta run with a space-separated `updated_since` that picks up exactly the VMs edited or created in the UI.
+5. 401 → token refresh and one retry; 429 → back off for `Retry-After`; 503 → the run fails and the client keeps its previous sync time.
 6. An API key and a Basic login with grants across collections; disable, rotate and revoke.
 7. The request log records OAuth, API-key and Basic traffic.

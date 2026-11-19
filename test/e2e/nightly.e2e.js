@@ -1,5 +1,5 @@
 // End-to-end test: starts the real server (node src/server.js) as a separate
-// process and drives it over HTTP the way the UI and a ServiceNow nightly job would.
+// process and drives it over HTTP the way the UI and a nightly sync client would.
 //
 //   npm run test:e2e
 //
@@ -37,9 +37,9 @@ async function http(method, p, { headers = {}, body, form } = {}) {
   return { status: r.status, headers: r.headers, json, text };
 }
 const basicAuth = (u, p) => ({ Authorization: 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64') });
-const glideNow = (d = new Date()) => d.toISOString().slice(0, 19).replace('T', ' '); // GlideDateTime.getValue()
+const spaceDate = (d = new Date()) => d.toISOString().slice(0, 19).replace('T', ' '); // "YYYY-MM-DD HH:mm:ss" (UTC)
 
-// ---- A ServiceNow-style nightly job, written from the integration requirements ----
+// ---- A nightly sync client, as a typical consumer would write it ----
 // OAuth client credentials; paginate until page == total_pages with a max-page cap;
 // on 401 refresh the token and retry once; on 429 back off for Retry-After and retry.
 async function nightlyJob({ clientId, clientSecret, updatedSince, maxPages = 20, events = [] }) {
@@ -132,30 +132,30 @@ describe('end to end', { concurrency: false }, () => {
     assert.equal((await http('GET', '/api/v1/vms', { headers: { 'X-Admin-Key': 'anything' } })).status, 401);
   });
 
-  test('create a ServiceNow OAuth client in the UI (vms read, scope inventory.read)', async () => {
+  test('create an OAuth client in the UI (vms read, custom scope inventory.read)', async () => {
     const r = await http('POST', '/__admin/credentials', {
-      body: { type: 'oauth_client', label: 'ServiceNow nightly', grants: [{ resource: 'vms', permissions: ['read'], scope: 'inventory.read' }] },
+      body: { type: 'oauth_client', label: 'Nightly sync', grants: [{ resource: 'vms', permissions: ['read'], scope: 'inventory.read' }] },
     });
     assert.equal(r.status, 201);
     assert.deepEqual(r.json.scopes, ['inventory.read']);
-    ctx.sn = { id: r.json.client_id, secret: r.json.client_secret, credId: r.json.id };
+    ctx.client = { id: r.json.client_id, secret: r.json.client_secret, credId: r.json.id };
     const listed = (await http('GET', '/__admin/credentials')).text;
-    assert.ok(!listed.includes(ctx.sn.secret) && !listed.includes('secret_hash'), 'secret never listed');
+    assert.ok(!listed.includes(ctx.client.secret) && !listed.includes('secret_hash'), 'secret never listed');
   });
 
   test('token endpoint: Basic and form auth work; wrong secret, other scopes and grant types fail', async () => {
-    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.sn.id, ctx.sn.secret), form: { grant_type: 'client_credentials' } })).status, 200);
-    const post = await http('POST', '/oauth/token', { form: { grant_type: 'client_credentials', client_id: ctx.sn.id, client_secret: ctx.sn.secret, scope: 'inventory.read' } });
+    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.client.id, ctx.client.secret), form: { grant_type: 'client_credentials' } })).status, 200);
+    const post = await http('POST', '/oauth/token', { form: { grant_type: 'client_credentials', client_id: ctx.client.id, client_secret: ctx.client.secret, scope: 'inventory.read' } });
     assert.equal(post.json.scope, 'inventory.read');
     assert.equal(post.json.token_type, 'Bearer');
-    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.sn.id, 'nope'), form: { grant_type: 'client_credentials' } })).status, 401);
-    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.sn.id, ctx.sn.secret), form: { grant_type: 'client_credentials', scope: 'inventory.write' } })).json.error, 'invalid_scope');
-    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.sn.id, ctx.sn.secret), form: { grant_type: 'password' } })).json.error, 'unsupported_grant_type');
+    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.client.id, 'nope'), form: { grant_type: 'client_credentials' } })).status, 401);
+    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.client.id, ctx.client.secret), form: { grant_type: 'client_credentials', scope: 'inventory.write' } })).json.error, 'invalid_scope');
+    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.client.id, ctx.client.secret), form: { grant_type: 'password' } })).json.error, 'unsupported_grant_type');
   });
 
   test('nightly run 1 (full load): paginates 3 pages, gets all 450 VMs with the sample records', async () => {
     ctx.runStart = new Date(Date.now() - 1000);
-    const { vms, totalPages } = await nightlyJob({ clientId: ctx.sn.id, clientSecret: ctx.sn.secret });
+    const { vms, totalPages } = await nightlyJob({ clientId: ctx.client.id, clientSecret: ctx.client.secret });
     assert.equal(totalPages, 3);
     assert.equal(vms.length, 450);
     assert.equal(new Set(vms.map((v) => v.vm_id)).size, 450);
@@ -164,12 +164,12 @@ describe('end to end', { concurrency: false }, () => {
     assert.equal(byId['vm-002'].guest_os.family, 'Windows');
     assert.equal(byId['vm-004'].ip_address, '999.1.1.1');
     assert.ok(vms.every((v) => !Object.keys(v).some((k) => k.startsWith('_'))), 'no internal fields leak');
-    ctx.lastSuccessfulRun = glideNow(ctx.runStart); // job stores this only after a fully successful run
+    ctx.lastSuccessfulRun = spaceDate(ctx.runStart); // job stores this only after a fully successful run
   });
 
-  test('changes made in the UI show up in the next delta run (GlideDateTime updated_since)', async () => {
+  test('changes made in the UI show up in the next delta run (space-separated updated_since)', async () => {
     await sleep(1100);
-    const since = glideNow();
+    const since = spaceDate();
     await sleep(1100);
     // Edit one VM and create one through the UI, and mark two as changed with Test Controls.
     assert.equal((await http('PATCH', '/__admin/data/vms/vm-005', { body: { status: 'stopped', hostname: 'edited-in-ui' } })).status, 200);
@@ -178,7 +178,7 @@ describe('end to end', { concurrency: false }, () => {
     ctx.newVm = created.json.vm_id;
     await http('POST', '/__admin/touch', { body: { vm_ids: ['vm-010', 'vm-020'] } });
 
-    const { vms } = await nightlyJob({ clientId: ctx.sn.id, clientSecret: ctx.sn.secret, updatedSince: since });
+    const { vms } = await nightlyJob({ clientId: ctx.client.id, clientSecret: ctx.client.secret, updatedSince: since });
     assert.deepEqual(vms.map((v) => v.vm_id).sort(), ['vm-005', 'vm-010', 'vm-020', ctx.newVm].sort());
     assert.equal(vms.find((v) => v.vm_id === 'vm-005').hostname, 'edited-in-ui');
   });
@@ -186,7 +186,7 @@ describe('end to end', { concurrency: false }, () => {
   test('resilience: 401 → refresh once, 429 → back off, 503 → run fails and last_successful_run stays put', async () => {
     await http('POST', '/__admin/chaos', { body: { unauthorized_next: 1, rate_limit_next: 1 } });
     const events = [];
-    const ok = await nightlyJob({ clientId: ctx.sn.id, clientSecret: ctx.sn.secret, events });
+    const ok = await nightlyJob({ clientId: ctx.client.id, clientSecret: ctx.client.secret, events });
     assert.equal(ok.vms.length, 451);
     assert.deepEqual(events, ['token', '401→refresh', 'token', '429→wait 2s']);
 
@@ -194,8 +194,8 @@ describe('end to end', { concurrency: false }, () => {
     await http('POST', '/__admin/chaos', { body: { server_error_next: 1 } });
     let failed = false;
     try {
-      await nightlyJob({ clientId: ctx.sn.id, clientSecret: ctx.sn.secret, updatedSince: before });
-      ctx.lastSuccessfulRun = glideNow();
+      await nightlyJob({ clientId: ctx.client.id, clientSecret: ctx.client.secret, updatedSince: before });
+      ctx.lastSuccessfulRun = spaceDate();
     } catch (e) {
       failed = /503/.test(e.message);
     }
@@ -234,14 +234,14 @@ describe('end to end', { concurrency: false }, () => {
     assert.equal((await http('GET', '/api/v1/vms', { headers: K })).status, 401);
     assert.equal((await http('GET', '/api/v1/vms?limit=1', { headers: { 'X-API-Key': rotated.api_key } })).status, 200);
 
-    // Revoking the ServiceNow client kills its live tokens too.
-    const t = (await http('POST', '/oauth/token', { headers: basicAuth(ctx.sn.id, ctx.sn.secret), form: { grant_type: 'client_credentials' } })).json.access_token;
-    await http('DELETE', `/__admin/credentials/${ctx.sn.credId}`);
+    // Revoking the sync client kills its live tokens too.
+    const t = (await http('POST', '/oauth/token', { headers: basicAuth(ctx.client.id, ctx.client.secret), form: { grant_type: 'client_credentials' } })).json.access_token;
+    await http('DELETE', `/__admin/credentials/${ctx.client.credId}`);
     assert.equal((await http('GET', '/api/v1/vms', { headers: { Authorization: `Bearer ${t}` } })).status, 401);
-    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.sn.id, ctx.sn.secret), form: { grant_type: 'client_credentials' } })).status, 401);
+    assert.equal((await http('POST', '/oauth/token', { headers: basicAuth(ctx.client.id, ctx.client.secret), form: { grant_type: 'client_credentials' } })).status, 401);
   });
 
-  test('request log records the integration traffic', async () => {
+  test('request log records the client traffic', async () => {
     const st = (await http('GET', '/__admin/state')).json;
     const actors = new Set(st.recent_requests.map((r) => r.actor));
     assert.ok(actors.has('oauth') && actors.has('api_key') && actors.has('basic'));

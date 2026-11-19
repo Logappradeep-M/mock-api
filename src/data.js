@@ -1,6 +1,6 @@
-// Deterministic VM inventory. The first four records are the exact sample from the
-// requirement; the rest are generated with realistic variety and deliberate dirty
-// data so every transform / reject / normalization rule in ServiceNow gets exercised.
+// Deterministic sample VM inventory. The first four records are hand-written
+// examples; the rest are generated with realistic variety and deliberate dirty
+// data (bad IPs, empty hostnames, naming variants, duplicates) for testing clients.
 //
 // Each record carries an internal `_updated_at` used for the updated_since filter.
 // Fields starting with "_" are never returned by the API.
@@ -149,7 +149,7 @@ const ENVIRONMENTS = [
 const OWNERS = [
   'alice@acme.com', 'bob@acme.com', 'carol@acme.com', 'dave@acme.com', 'erin@acme.com',
   'ALICE@ACME.COM', ' bob@acme.com ', // case / whitespace variants
-  'unknown@acme.com', 'former.employee@acme.com', // not in sys_user
+  'unknown@acme.com', 'former.employee@acme.com', // users that don't exist anywhere
 ];
 
 const COST_CENTERS = ['CC100', 'CC200', 'CC300', 'CC400', 'CC999', 'cc100'];

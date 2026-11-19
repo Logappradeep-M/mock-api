@@ -17,7 +17,7 @@ const STATIC = {
 
 const RESOURCE_NAME = /^[a-z][a-z0-9_-]{0,39}$/;
 const LIST_PARAMS = new Set(['page', 'page_size', 'limit', 'skip', 'sortBy', 'order', 'q', 'select', 'delay', 'updated_since', 'include_meta']);
-const BUILTIN = { name: 'vms', id_field: 'vm_id', auth_required: true, builtin: true, description: 'Cloud VM inventory (the contract ServiceNow consumes)' };
+const BUILTIN = { name: 'vms', id_field: 'vm_id', auth_required: true, builtin: true, description: 'Sample cloud VM inventory' };
 
 class HttpError extends Error {
   constructor(status, error, description, headers) {
@@ -86,7 +86,7 @@ function mergePatch(target, patch) {
 }
 
 // Accepts ISO 8601 ("2026-11-18T02:00:00Z"), date only ("2026-11-18") and
-// ServiceNow GlideDateTime.getValue() format ("2026-11-18 02:00:00", treated as UTC).
+// space-separated date-time ("2026-11-18 02:00:00", treated as UTC).
 export function parseUpdatedSince(value) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) value += 'T00:00:00Z';
   else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) value = value.replace(' ', 'T') + 'Z';
@@ -119,9 +119,13 @@ export async function createApp(config, { log = console.log, store } = {}) {
     requests: [], // last 300 request summaries
   };
 
+  // Creates the sample vms collection. On startup it is skipped if the collection
+  // exists, or if the user deleted it (remembered in meta, so it stays deleted).
   async function seedVms({ replace = false } = {}) {
     const existing = await store.getResource('vms');
     if (existing && !replace) return;
+    if (!existing && !replace && await store.getMeta('vms_sample_deleted')) return;
+    await store.setMeta('vms_sample_deleted', null);
     if (!existing) await store.createResource(BUILTIN);
     else await store.clear('vms');
     const vms = buildInventory({ count: config.vmCount, seed: config.dataSeed });
@@ -129,6 +133,14 @@ export async function createApp(config, { log = console.log, store } = {}) {
     await store.updateResource('vms', { next_id: vms.length + 1 });
   }
   await seedVms();
+  // One-time cleanup: databases created by older versions stored a previous default
+  // description for the sample collection. Replace only that exact text.
+  {
+    const vms = await store.getResource('vms');
+    if (vms?.builtin && vms.description === 'Cloud VM inventory (the contract ServiceNow consumes)') {
+      await store.updateResource('vms', { description: BUILTIN.description });
+    }
+  }
 
   // ---- Credentials -------------------------------------------------------------
   // Three kinds of credentials, managed in the UI's Credentials page:
@@ -587,6 +599,11 @@ export async function createApp(config, { log = console.log, store } = {}) {
       }
       return json(res, 200, { touched: targets.map((v) => v.vm_id), updated_at: now.toISOString() });
     }
+    if (m === 'POST' && section === 'samples' && name === 'vms') {
+      // Restore the sample VM collection (recreates it if it was deleted).
+      await seedVms({ replace: true });
+      return json(res, 200, { restored: 'vms' });
+    }
     if (m === 'POST' && section === 'reset') {
       await seedVms({ replace: true });
       state.tokens.clear();
@@ -634,8 +651,9 @@ export async function createApp(config, { log = console.log, store } = {}) {
           return json(res, 200, await store.updateResource(name, patch));
         }
         if (m === 'DELETE') {
-          if (def.builtin) throw new HttpError(400, 'invalid_request', 'The built-in vms resource can be reset but not deleted');
           await store.deleteResource(name);
+          // Remember that the sample collection was removed so a restart doesn't bring it back.
+          if (def.builtin) await store.setMeta('vms_sample_deleted', true);
           // Remove this collection from every credential's grants.
           for (const c of (await store.listCredentials()).map(normalizeCred)) {
             if (c.grants.some((g) => g.resource === name)) {

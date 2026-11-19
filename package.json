@@ -1,7 +1,7 @@
 {
   "name": "mock-api-studio",
   "version": "1.0.0",
-  "description": "Mock API Studio: build mock REST APIs with a web UI, OAuth 2.0, API keys and Basic auth. Ships with the cloud VM inventory used to test the ServiceNow CMDB integration.",
+  "description": "Mock API Studio: build mock REST APIs with a web UI, OAuth 2.0, API keys and Basic auth. Ships with a sample cloud VM inventory.",
   "type": "module",
   "main": "src/server.js",
   "scripts": {

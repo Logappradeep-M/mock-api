@@ -1,9 +1,9 @@
 // Shared test helpers. There are no built-in credentials, so tests create them
 // through the management API exactly like the UI does.
 
-// The access ServiceNow needs: read (and optionally write) on every collection,
-// exposed under the scope names from the integration spec.
-export const SERVICENOW_GRANTS = [
+// Full access to every collection, exposed under custom scope names
+// (inventory.read / inventory.write) so tests also cover custom scopes.
+export const FULL_ACCESS_GRANTS = [
   { resource: '*', permissions: ['read'], scope: 'inventory.read' },
   { resource: '*', permissions: ['write'], scope: 'inventory.write' },
 ];
@@ -19,7 +19,7 @@ export async function createCredential(base, body) {
   return json;
 }
 
-export async function createOAuthClient(base, grants = SERVICENOW_GRANTS, extra = {}) {
+export async function createOAuthClient(base, grants = FULL_ACCESS_GRANTS, extra = {}) {
   const c = await createCredential(base, { type: 'oauth_client', label: 'test client', grants, ...extra });
   return { id: c.client_id, secret: c.client_secret, credential: c };
 }

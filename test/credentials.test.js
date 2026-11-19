@@ -91,14 +91,14 @@ test('Basic auth user: generated or chosen username, all-collections grant', asy
   assert.equal((await call('POST', '/api/v1/users', auth, {})).status, 403);
   assert.equal((await call('GET', '/api/v1/users', basic(c.body.username, 'wrong'))).status, 401);
 
-  const named = await mgmt('POST', '/__admin/credentials', { type: 'basic', username: 'servicenow', grants: [{ resource: 'vms', permissions: ['read'] }] });
-  assert.equal(named.body.username, 'servicenow');
-  assert.equal((await mgmt('POST', '/__admin/credentials', { type: 'basic', username: 'servicenow', grants: [{ resource: 'vms', permissions: ['read'] }] })).status, 409);
+  const named = await mgmt('POST', '/__admin/credentials', { type: 'basic', username: 'reporting-svc', grants: [{ resource: 'vms', permissions: ['read'] }] });
+  assert.equal(named.body.username, 'reporting-svc');
+  assert.equal((await mgmt('POST', '/__admin/credentials', { type: 'basic', username: 'reporting-svc', grants: [{ resource: 'vms', permissions: ['read'] }] })).status, 409);
 });
 
 test('OAuth client: multi-collection scopes, custom scope names, narrowing', async () => {
   const c = await mgmt('POST', '/__admin/credentials', {
-    type: 'oauth_client', label: 'ServiceNow', token_ttl_seconds: 120,
+    type: 'oauth_client', label: 'Sync client', token_ttl_seconds: 120,
     grants: [
       { resource: 'vms', permissions: ['read'], scope: 'inventory.read' },
       { resource: 'users', permissions: ['read', 'write'] },
@@ -175,7 +175,7 @@ test('invalid credential requests are rejected', async () => {
   assert.equal(await bad({ type: 'oauth_client', token_ttl_seconds: 5, grants: [{ resource: 'users', permissions: ['read'] }] }), 400);
 });
 
-test('ServiceNow-style client (custom scopes on all collections) reaches every private collection', async () => {
+test('client with custom scopes on all collections reaches every private collection', async () => {
   const sn = await createOAuthClient(base);
   const t = await token(sn.id, sn.secret, 'inventory.read');
   const b = { Authorization: `Bearer ${t.body.access_token}` };

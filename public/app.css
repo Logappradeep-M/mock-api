@@ -198,12 +198,6 @@ table.grid { width: 100%; border-collapse: separate; border-spacing: 0; font-var
 .grid .empty-cell { color: var(--text-3); }
 .grid .ws { background: var(--warn-soft); color: var(--warn); border-radius: 3px; padding: 0 2px; white-space: pre; }
 
-/* Outcome chip: the signature */
-.outcome { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; }
-.outcome svg { width: 14px; height: 14px; }
-.outcome.ok { color: var(--ok); }
-.outcome.vm { color: var(--warn); }
-.outcome.bad { color: var(--bad); }
 
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--text-2); }
 .pager { display: flex; align-items: center; gap: 4px; }

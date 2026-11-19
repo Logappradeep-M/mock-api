@@ -116,6 +116,11 @@ export class MemoryStore {
     for (const [id, c] of this.#creds) if (c.resource === resource) this.#creds.delete(id);
   }
 
+  // Small key/value settings (e.g. "the sample vms collection was deleted").
+  #meta = new Map();
+  async getMeta(key) { return this.#meta.get(key) ?? null; }
+  async setMeta(key, value) { if (value === null) this.#meta.delete(key); else this.#meta.set(key, value); }
+
   #col(name) {
     const c = this.#records.get(name);
     if (!c) throw new NotFoundError(`Resource "${name}" not found`);
@@ -187,6 +192,7 @@ export class MongoStore {
   }
 
   async init() {
+    if (this.#client) return; // already connected; don't open a second client
     const { MongoClient } = await import('mongodb');
     this.#client = new MongoClient(this.uri, { serverSelectionTimeoutMS: 3000 });
     await this.#client.connect();
@@ -221,6 +227,15 @@ export class MongoStore {
   }
   async deleteCredentialsFor(resource) {
     await this.#creds().deleteMany({ resource });
+  }
+
+  // Small key/value settings (e.g. "the sample vms collection was deleted").
+  async getMeta(key) {
+    return (await this.#db.collection('meta').findOne({ _id: key }))?.value ?? null;
+  }
+  async setMeta(key, value) {
+    if (value === null) await this.#db.collection('meta').deleteOne({ _id: key });
+    else await this.#db.collection('meta').updateOne({ _id: key }, { $set: { value } }, { upsert: true });
   }
   async close() {
     await this.#client?.close();

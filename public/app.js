@@ -168,7 +168,7 @@ async function route() {
   else if (view === 'credentials') next = { view: 'credentials', filter: name ? decodeURIComponent(name) : '' };
   else if (view === 'r' && name) next = { view: 'resource', name: decodeURIComponent(name) };
   else if (['connection', 'controls', 'log'].includes(view)) next = { view };
-  else next = { view: 'resource', name: 'vms' };
+  else next = { view: 'resource', name: defaultCollection() };
 
   if (S.insp?.dirty && !(await confirmDiscard())) {
     history.replaceState(null, '', S.route.view === 'resource' ? `#/r/${S.route.name}` : `#/${S.route.view}`);
@@ -207,14 +207,23 @@ function copyButton(text, label = 'Copy') {
   }, icon('copy'));
 }
 
+// First collection to show: vms if it exists, otherwise the first one.
+const defaultCollection = () => (S.resources.some((r) => r.name === 'vms') ? 'vms' : S.resources[0]?.name || '');
+
 // ---------- Resource view ----------
 async function showResource(name) {
   if (!S.resources.some((r) => r.name === name)) await loadResources();
   const def = currentDef();
   const main = clear($('#main'));
   if (!def) {
-    main.append(h('div', { class: 'empty' }, icon('table'), h('h2', {}, `No resource named “${name}”`),
-      h('a', { href: '#/r/vms' }, 'Go to vms')));
+    const first = defaultCollection();
+    main.append(h('header', { class: 'toolbar' }, sidebarButton(), h('div', { class: 'title' }, h('h1', {}, 'Collections'))),
+      h('div', { class: 'empty' }, icon('table'),
+        h('h2', {}, name ? `No collection named “${name}”` : 'No collections yet'),
+        h('p', { class: 'secondary' }, 'Create a collection to get REST endpoints for it.'),
+        h('div', { class: 'row-actions' },
+          h('button', { class: 'btn primary', type: 'button', onclick: newResourceSheet }, icon('plus'), 'New Resource'),
+          first ? h('a', { class: 'btn', href: `#/r/${encodeURIComponent(first)}` }, `Open ${first}`) : null)));
     return;
   }
   if (S.list.name !== name) Object.assign(S.list, { name, skip: 0, q: '', sortBy: '', order: 'asc' });
@@ -265,7 +274,6 @@ const VM_COLUMNS = [
   { key: 'guest_os.family', label: 'Operating System', render: (v) => osText(v.guest_os) },
   { key: 'environment', label: 'Environment' },
   { key: 'status', label: 'Status' },
-  { key: null, label: 'ServiceNow Result', render: (v) => outcomeChip(vmOutcome(v)) },
   { key: '_updated_at', label: 'Updated', render: (v) => h('span', { class: 'tertiary', title: v._updated_at }, relTime(v._updated_at)) },
 ];
 
@@ -363,57 +371,6 @@ function osText(os) {
   return parts.length ? parts.join(' ') : h('span', { class: 'empty-cell' }, '—');
 }
 
-// ---------- ServiceNow outcome (mirrors the integration's mapping rules) ----------
-const IPV4 = /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
-const STATUS_MAP = { running: 1, stopped: 2 };
-
-function vmOutcome(vm) {
-  const notes = [];
-  const rawHost = vm.hostname;
-  const host = (rawHost ?? '').toString().trim().toLowerCase();
-  const ip = (vm.ip_address ?? '').toString().trim();
-  const rejects = [];
-  if (!host) rejects.push(rawHost === undefined || rawHost === null ? 'Hostname is missing' : 'Hostname is empty');
-  if (!IPV4.test(ip)) rejects.push(ip ? `“${ip}” isn’t a valid IPv4 address` : 'IP address is missing');
-  if (rejects.length) {
-    return {
-      kind: 'bad', label: 'Rejected', title: 'Rejected and written to u_etl_error_log',
-      notes: [...rejects.map((t) => ({ level: 'bad', text: t })), { level: 'info', text: 'No CI is created for this record' }],
-    };
-  }
-  const family = (vm.guest_os?.family ?? '').toString().trim().toLowerCase();
-  const cls = family === 'windows' ? 'cmdb_ci_win_server' : family === 'linux' ? 'cmdb_ci_linux_server' : null;
-  notes.push({ level: 'ok', text: ['cmdb_ci_vm_instance, object_id ', code(vm.vm_id)] });
-  if (cls) notes.push({ level: 'ok', text: [code(cls), ' with a Virtualized by relationship'] });
-  else notes.push({ level: 'warn', text: family ? `OS family “${vm.guest_os.family}” isn’t Windows or Linux. Only the VM is created, and it’s logged.` : 'No OS family. Only the VM is created, and it’s logged.' });
-  if (rawHost !== host) notes.push({ level: 'info', text: ['name becomes ', code(host)] });
-  if (vm.status !== undefined && !(String(vm.status) in STATUS_MAP)) notes.push({ level: 'warn', text: `Status “${vm.status}” has no operational_status mapping` });
-  else if (vm.status !== undefined) notes.push({ level: 'info', text: ['operational_status ', code(STATUS_MAP[vm.status])] });
-  if (typeof vm.ram_gb === 'number') notes.push({ level: 'info', text: ['ram ', code(`${vm.ram_gb * 1024} MB`)] });
-  const sw = Array.isArray(vm.installed_software) ? vm.installed_software : [];
-  if (sw.length && cls) {
-    const keys = sw.map((s) => `${s?.name}|${s?.version}`);
-    const dup = new Set(keys).size < keys.length;
-    notes.push({ level: dup ? 'warn' : 'info', text: `${sw.length} software install${sw.length > 1 ? 's' : ''} upserted into cmdb_sam_sw_install${dup ? '. Includes duplicates, so the upsert has to dedupe them.' : ''}` });
-  } else if (sw.length) notes.push({ level: 'warn', text: `${sw.length} software install${sw.length > 1 ? 's are' : ' is'} skipped because there’s no server CI to link to` });
-  if (vm.last_seen !== undefined && Number.isNaN(Date.parse(vm.last_seen))) notes.push({ level: 'warn', text: `last_seen “${vm.last_seen}” isn’t valid ISO 8601` });
-  if (!vm.owner_email) notes.push({ level: 'info', text: 'No owner email, so owned_by stays empty' });
-  return cls
-    ? { kind: 'ok', label: family === 'windows' ? 'Windows server' : 'Linux server', title: `Loads as VM + ${family === 'windows' ? 'Windows' : 'Linux'} server`, notes }
-    : { kind: 'vm', label: 'VM only', title: 'Loads as VM instance only', notes };
-}
-const code = (t) => h('code', { class: 'val' }, String(t ?? ''));
-
-function outcomeChip(o) {
-  return h('span', { class: `outcome ${o.kind}` }, icon(o.kind === 'ok' ? 'check' : o.kind === 'bad' ? 'x' : 'warn'), o.label);
-}
-function outcomePreview(o) {
-  const ICON = { ok: 'check', bad: 'x', warn: 'warn', info: 'arrow' };
-  return h('section', { class: 'preview', 'aria-label': 'ServiceNow result' },
-    h('div', { class: `preview-head ${o.kind}` }, icon(o.kind === 'ok' ? 'check' : o.kind === 'bad' ? 'x' : 'warn'), o.title),
-    h('ul', {}, o.notes.map((n) => h('li', { class: n.level }, icon(ICON[n.level]), h('span', {}, n.text)))));
-}
-
 // ---------- Inspector ----------
 async function confirmDiscard() {
   return confirmSheet('Discard Unsaved Changes?', 'Your edits to this record will be lost.', 'Discard');
@@ -492,7 +449,6 @@ function renderInspector() {
       I.isNew ? null : h('button', { class: 'btn', type: 'button', onclick: duplicateRecord }, 'Duplicate'),
       h('span', { class: 'spacer' }), dirty, saveBtn));
 
-  if (isVm) body.append(h('div', { id: 'preview-slot' }));
   if (isVm && I.mode === 'form') body.append(vmForm());
   else body.append(jsonEditor());
   if (!I.isNew && I.meta?._updated_at) {
@@ -505,8 +461,6 @@ function refreshInspectorState() {
   const I = S.insp;
   if (!I) return;
   I.dirty = I.isNew || JSON.stringify(I.working) !== JSON.stringify(I.original);
-  const slot = $('#preview-slot');
-  if (slot) clear(slot).append(outcomePreview(vmOutcome(I.working)));
   $('#save-btn').disabled = !I.dirty || !!I.jsonError;
   $('#dirty-note').textContent = I.jsonError ? 'Fix the JSON to save' : I.dirty && !I.isNew ? 'Edited' : '';
 }
@@ -567,7 +521,7 @@ function vmForm() {
   );
   wrap.append(
     h('div', { class: 'fieldset' }, h('h3', {}, 'Identity'),
-      input('vm_id', { label: 'VM ID', mono: true, hint: I.isNew ? 'Leave blank to generate one.' : 'Maps to object_id, the IRE identifier.' }),
+      input('vm_id', { label: 'VM ID', mono: true, hint: I.isNew ? 'Leave blank to generate one.' : 'The unique ID for this VM.' }),
       input('hostname', { label: 'Hostname', mono: true, hint: 'Leading or trailing spaces are kept, so you can test trimming.' }),
       input('ip_address', { label: 'IP Address', mono: true })),
     h('div', { class: 'fieldset' }, h('h3', {}, 'Guest OS'),
@@ -832,18 +786,22 @@ function resourceSettingsSheet(def) {
       } catch (e) { fail(e); }
     },
   }, def.builtin ? 'Restore Generated Data…' : 'Delete All Records…');
-  const deleteBtn = def.builtin ? null : h('button', {
+  const deleteBtn = h('button', {
     class: 'btn danger', type: 'button',
     onclick: async () => {
       $('#sheet').close('cancel');
-      const ok = await confirmSheet(`Delete the ${def.name} Resource?`, `/api/v1/${def.name} and all of its records will be removed. You can’t undo this.`, 'Delete Resource');
+      const ok = await confirmSheet(`Delete the ${def.name} Resource?`,
+        def.builtin
+          ? `/api/v1/vms and all ${def.count ?? ''} VMs will be removed, and it stays deleted after a restart. You can bring the sample VMs back from Test Controls.`
+          : `/api/v1/${def.name} and all of its records will be removed. You can’t undo this.`,
+        'Delete Resource');
       if (!ok) return;
       try {
         await api('DELETE', `/__admin/resources/${def.name}`);
         closeInspector(true);
         toast(`Deleted ${def.name}`);
         await loadResources();
-        location.hash = '#/r/vms';
+        location.hash = defaultCollection() ? `#/r/${encodeURIComponent(defaultCollection())}` : '#/';
       } catch (e) { fail(e); }
     },
   }, 'Delete Resource…');
@@ -1063,7 +1021,7 @@ function expiryField(current) {
 async function editCredential(cred, collection) {
   const isNew = !cred;
   let type = cred?.type || 'api_key';
-  const label = h('input', { type: 'text', maxlength: '80', value: cred?.label || '', placeholder: 'e.g. ServiceNow production', autocomplete: 'off' });
+  const label = h('input', { type: 'text', maxlength: '80', value: cred?.label || '', placeholder: 'e.g. Partner app (production)', autocomplete: 'off' });
   const username = h('input', { type: 'text', class: 'mono', placeholder: 'Leave blank to generate one', autocomplete: 'off', spellcheck: 'false' });
   const ttl = h('input', { type: 'number', min: '30', max: '86400', step: '1', value: cred?.token_ttl_seconds ?? '', placeholder: `${S.info.oauth.token_ttl_seconds} (server default)` });
   const grantState = {
@@ -1179,7 +1137,7 @@ function showConnection() {
   const curl = `# 1. Get a token with an OAuth client from the Credentials page
 curl -s -X POST ${tokenUrl} \\
   -u "$CLIENT_ID:$CLIENT_SECRET" \\
-  -d grant_type=client_credentials -d scope=inventory.read
+  -d grant_type=client_credentials -d scope=vms.read
 
 # 2. Call the API
 curl -s "${base}/api/v1/vms?updated_since=2026-11-18T00:00:00Z&page=1&page_size=200" \\
@@ -1187,7 +1145,7 @@ curl -s "${base}/api/v1/vms?updated_since=2026-11-18T00:00:00Z&page=1&page_size=
 
   main.append(
     h('header', { class: 'toolbar' }, sidebarButton(), h('div', { class: 'title' }, h('h1', {}, 'Connection'),
-      h('span', { class: 'secondary' }, 'Use these values in ServiceNow, Postman or curl.'))),
+      h('span', { class: 'secondary' }, 'Use these values in Postman, curl or your own apps.'))),
     h('div', { class: 'page' },
       h('section', { class: 'card' },
         h('div', { class: 'card-head' }, h('h2', {}, 'OAuth 2.0'),
@@ -1217,14 +1175,7 @@ curl -s "${base}/api/v1/vms?updated_since=2026-11-18T00:00:00Z&page=1&page_size=
           h('code', {}, 'X-API-Key'), ' header, Basic credentials or a Bearer token. Create them on the ', h('a', { href: '#/credentials' }, 'Credentials'), ' page.')),
       h('section', { class: 'card' },
         h('div', { class: 'card-head' }, h('h2', {}, 'Try It'), copyButton(curl, 'Copy commands')),
-        h('pre', { class: 'code' }, curl)),
-      h('section', { class: 'card' },
-        h('h2', {}, 'ServiceNow Setup'),
-        h('ol', { class: 'steps' },
-          h('li', {}, 'Create an OAuth client on the Credentials page with read access to vms and the custom scope inventory.read. Then in ServiceNow: System OAuth › Application Registry › New › Connect to a third party OAuth Provider. Enter that client ID and secret, set the default grant type to Client Credentials, and set the token URL above.'),
-          h('li', {}, 'On the OAuth Entity Profile, add the scope ', h('code', {}, 'inventory.read'), '.'),
-          h('li', {}, 'Create a Connection & Credential Alias, an HTTP(S) Connection with the base URL, and an OAuth 2.0 Credential that uses that profile.'),
-          h('li', {}, 'In the Data Stream action, call ', h('code', {}, 'GET /api/v1/vms'), ' and paginate until ', h('code', {}, 'page == total_pages'), '.')))));
+        h('pre', { class: 'code' }, curl))));
 }
 
 // ---------- Test controls ----------
@@ -1232,7 +1183,7 @@ async function showControls() {
   const main = clear($('#main'));
   main.append(
     h('header', { class: 'toolbar' }, sidebarButton(), h('div', { class: 'title' }, h('h1', {}, 'Test Controls'),
-      h('span', { class: 'secondary' }, 'Make the API misbehave on purpose so you can test the integration’s error handling.'))),
+      h('span', { class: 'secondary' }, 'Make the API misbehave on purpose so you can test how your client handles errors.'))),
     h('div', { class: 'page', id: 'controls-page' }));
   await renderControls();
 }
@@ -1273,10 +1224,10 @@ async function renderControls() {
         h('span', {}, h('b', {}, st.stats.api_429), ' × 429'),
         h('span', {}, h('b', {}, st.stats.api_5xx), ' × 5xx'))),
     h('section', { class: 'controls', 'aria-label': 'Failure simulation' },
-      chaosRow('unauthorized_next', 'Fail With 401', 'The next N OAuth calls get 401 invalid_token. The integration should get a new token and retry once.', 100, ''),
-      chaosRow('rate_limit_next', 'Fail With 429', 'The next N OAuth calls get 429 with Retry-After: 2. The integration should wait, then retry.', 100, ''),
-      chaosRow('server_error_next', 'Fail With 503', 'The next N OAuth calls get 503. The run should fail and leave last_successful_run unchanged.', 100, ''),
-      chaosRow('delay_ms', 'Slow Responses', 'Adds this delay to every OAuth and public call.', 30000, ' ms')),
+      chaosRow('unauthorized_next', 'Fail With 401', 'The next N calls with credentials get 401 invalid_token. A well-behaved client gets a new token and retries.', 100, ''),
+      chaosRow('rate_limit_next', 'Fail With 429', 'The next N calls with credentials get 429 with Retry-After: 2. A well-behaved client waits, then retries.', 100, ''),
+      chaosRow('server_error_next', 'Fail With 503', 'The next N calls with credentials get 503 Service Unavailable with Retry-After: 5.', 100, ''),
+      chaosRow('delay_ms', 'Slow Responses', 'Adds this delay to every API call.', 30000, ' ms')),
     h('section', { class: 'controls', 'aria-label': 'Data and token actions' },
       h('div', { class: 'control' },
         h('div', { class: 'desc' }, h('h3', {}, 'Mark VMs as Changed'), h('p', { class: 'secondary' }, 'Sets updated time and last_seen to now on random VMs, so the next delta run picks up only those.')),
@@ -1295,8 +1246,16 @@ async function renderControls() {
           class: 'btn', type: 'button',
           onclick: async () => { try { const r = await api('POST', '/__admin/revoke-tokens', {}); toast(`Revoked ${r.revoked} token${r.revoked === 1 ? '' : 's'}`); renderControls(); } catch (e) { fail(e); } },
         }, 'Revoke')),
+      S.resources.some((r) => r.name === 'vms') ? null : h('div', { class: 'control' },
+        h('div', { class: 'desc' }, h('h3', {}, 'Restore Sample VMs'), h('p', { class: 'secondary' }, 'Recreates the vms collection with the 450 generated sample VMs.')),
+        h('button', {
+          class: 'btn', type: 'button',
+          onclick: async () => {
+            try { await api('POST', '/__admin/samples/vms', {}); await loadResources(); toast('Restored the vms collection'); renderControls(); } catch (e) { fail(e); }
+          },
+        }, 'Restore')),
       h('div', { class: 'control' },
-        h('div', { class: 'desc' }, h('h3', {}, 'Reset Everything'), h('p', { class: 'secondary' }, 'Restores the generated VMs and clears tokens, counters, failure settings and the request log. Custom resources are kept.')),
+        h('div', { class: 'desc' }, h('h3', {}, 'Reset Everything'), h('p', { class: 'secondary' }, 'Restores the generated VMs (recreating the vms collection if you deleted it) and clears tokens, counters, failure settings and the request log. Other collections and credentials are kept.')),
         h('button', {
           class: 'btn danger', type: 'button',
           onclick: async () => {
@@ -1327,7 +1286,7 @@ async function renderLog() {
   clear(wrap);
   if (!rows.length) {
     wrap.append(h('div', { class: 'empty' }, icon('list'), h('h2', {}, 'No API calls yet'),
-      h('p', { class: 'secondary' }, 'Calls from ServiceNow, Postman or curl appear here as they arrive.')));
+      h('p', { class: 'secondary' }, 'Calls from Postman, curl or your apps appear here as they arrive.')));
     return;
   }
   wrap.append(h('table', { class: 'grid', 'aria-label': 'Recent requests' },
