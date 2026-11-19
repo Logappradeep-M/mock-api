@@ -45,7 +45,7 @@ async function token(scope) {
 }
 
 test('create a VM in the UI and read it back over OAuth', async () => {
-  const vm = { vm_id: 'vm-ui-1', hostname: 'ui-made-01', ip_address: '10.9.9.9', status: 'running', guest_os: { family: 'Linux', name: 'Ubuntu' } };
+  const vm = { vm_id: 'vm-ui-1', hostname: 'ui-made-01', ip_address: '10.9.9.9', status: 'running', osType: 'Linux', osName: 'Ubuntu', labels: { team: 'web' } };
   const created = await call('POST', '/api/v1/vms', vm);
   assert.equal(created.status, 201);
   assert.equal(created.body.hostname, 'ui-made-01');
@@ -69,9 +69,10 @@ test('duplicate id is 409, missing id is auto-generated', async () => {
 });
 
 test('PATCH merges (null removes), PUT replaces, DELETE removes', async () => {
-  let r = await call('PATCH', '/api/v1/vms/vm-ui-1', { status: 'stopped', guest_os: { version: '22.04' }, ip_address: null });
+  let r = await call('PATCH', '/api/v1/vms/vm-ui-1', { status: 'stopped', osVersion: '24.04', labels: { tier: '1' }, ip_address: null });
   assert.equal(r.body.status, 'stopped');
-  assert.deepEqual(r.body.guest_os, { family: 'Linux', name: 'Ubuntu', version: '22.04' });
+  assert.equal(r.body.osVersion, '24.04');
+  assert.deepEqual(r.body.labels, { team: 'web', tier: '1' });
   assert.ok(!('ip_address' in r.body));
 
   r = await call('PUT', '/api/v1/vms/vm-ui-1', { hostname: 'replaced' });

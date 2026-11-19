@@ -33,10 +33,11 @@ To run the CRUD and credential tests against MongoDB: `TEST_MONGODB_URI=<your ur
 
 ## The UI
 
-- **Resources**: a sortable, searchable table for each resource. VMs get a form editor (identity, guest OS, hardware, ownership, installed software) and a JSON tab. Other resources get a JSON editor. You can create, duplicate and delete records, and undo a delete.
+- **Resources**: a sortable, searchable table for each resource. VMs get a form editor (identity, operating system, hardware, ownership, installed software) and a JSON tab. Other resources get a JSON editor. You can create, duplicate and delete records, and undo a delete.
+- **API examples**: the **API** button on every collection, and the Credentials and Connection pages, show ready-to-run curl commands for that collection, each with a Copy button (plus Copy All). Choose API key, Basic auth or OAuth. They cover listing, page-by-page pagination, a loop that fetches every page, limit/skip, changed-since, search/filter/sort/select, get one, create, update (PATCH), replace (PUT) and delete, using the server's real URL, a real record ID and the collection's field names. After you create or rotate a credential, the same examples appear with its real secret filled in.
 - **New Resource**: create any collection, such as `users` or `cost_centers`, with its own ID field. Choose whether API callers need an OAuth token or can use it publicly, like mockapi.io. You can add starting records, or import a JSON array later.
 - **Credentials**: create API keys, Basic logins and OAuth clients. Give each one access to one, several or all collections, with read and/or write, custom OAuth scope names, an expiry and a token lifetime. Filter by type or collection, see when each was last used, turn them off and on, edit, rotate or revoke them. Secrets are shown once, with copy buttons and ready-made headers.
-- **Connection**: the token URL, endpoint URLs and curl examples.
+- **Connection**: the token URL, endpoint URLs and copyable curl examples.
 - **Test Controls**: force 401, 429 or 503 responses, add latency, revoke tokens, mark VMs as changed, or reset everything.
 - **Request Log**: live view of API calls, showing who called (OAuth, public or the UI), the status code and duration.
 
@@ -82,9 +83,9 @@ Credential admin routes: `GET|POST /__admin/credentials` (body `{ "type": "api_k
 | `limit`, `skip` | `?limit=10&skip=20` | dummyjson style. Response is `{ <resource>: [...], total, skip, limit }`. `limit=0` returns up to 1000. |
 | `updated_since` | `?updated_since=2026-11-18 02:00:00` | Records created or changed at or after this time |
 | `q` | `?q=ubuntu` | Case-insensitive search across the whole record |
-| `sortBy`, `order` | `?sortBy=hostname&order=desc` | Dotted paths work, e.g. `guest_os.family` |
+| `sortBy`, `order` | `?sortBy=hostname&order=desc` | Dotted paths into nested objects work too |
 | `select` | `?select=hostname,ip_address` | The ID field is always included |
-| any field | `?status=running&guest_os.family=Linux` | Exact match. Numbers and booleans also match their string form. |
+| any field | `?status=running&osType=Linux` | Exact match. Numbers and booleans also match their string form. |
 | `delay` | `?delay=1500` | Waits this many ms before responding (0–5000) |
 
 Every list response sets an `X-Total-Count` header.
@@ -125,19 +126,28 @@ Errors follow RFC 6749: `401 invalid_client`, `400 unsupported_grant_type`, `400
 
 ## Sample data
 
-The `vms` collection has 450 VMs (3 pages at 200 per page), generated from `DATA_SEED`, so every restart produces the same data. The first four records (`vm-001` to `vm-004`) are hand-written examples. The rest deliberately include messy values, useful for testing how a client cleans and validates data:
+The `vms` collection has 450 VMs (3 pages at 200 per page), generated from `DATA_SEED`, so every restart produces the same data. The first four records (`vm-001` to `vm-004`) are hand-written examples; `vm-003` and `vm-004` are deliberately sparse. Every other VM has the full set of fields:
+
+```json
+{ "vm_id", "hostname", "ip_address", "cloud_provider", "region", "cpu_count", "cpu_manufacturer",
+  "manufacturer", "model", "ram_gb", "disk_gb", "environment", "owner_email", "cost_center", "status",
+  "last_seen", "osType", "osName", "osVersion",
+  "installed_software": [{ "name", "publisher", "version", "install_date" }] }
+```
+
+The values are deliberately messy, which is useful for testing how a client cleans and validates data:
 
 | Field | Messy values in the data |
 |---|---|
-| `hostname` | `" WEB-PROD-01 "`, upper-case names, `""`, `"   "`, missing, duplicates on different `vm_id` |
+| `hostname` | `" WEB-PROD-01 "`, upper-case names, `""`, `"   "`, duplicates on different `vm_id` |
 | `ip_address` | `999.1.1.1`, `256.10.0.1`, `10.0.0`, `10.0.0.1.5`, `not-an-ip`, `fe80::1`, empty |
-| `guest_os.family` | Linux and Windows in mixed case, other families (`FreeBSD`, `Solaris`), empty, missing |
-| `guest_os.name` | `Win Server 2022`, `Win2019`, `Microsoft Windows Server 2019 Datacenter`, `RHEL` vs `Red Hat Enterprise Linux`, `ubuntu` vs `Ubuntu` |
+| `osType` | `Linux` and `Windows` in mixed case (`LINUX`, `windows`), plus `FreeBSD`, `Solaris`, `Other` |
+| `osName` | `Win Server 2022`, `Win2019`, `Microsoft Windows Server 2019 Datacenter`, `RHEL` vs `Red Hat Enterprise Linux`, `ubuntu` vs `Ubuntu` |
 | `cpu_manufacturer` | `Intel Corporation`, `GenuineIntel`, `intel`, `AuthenticAMD`, `AMD`, `Advanced Micro Devices, Inc.` |
-| `manufacturer` / `model` | `VMware, Inc.`, `Amazon EC2`, `Microsoft Corporation`, `Google`, upper-case variants, missing |
+| `manufacturer` / `model` | `VMware, Inc.`, `Amazon EC2`, `Microsoft Corporation`, `Google`, upper-case variants |
 | `environment` | `Production`/`Prod`/`PROD`, `Development`/`Dev`, `QA`, `Test`, `UAT`, `Staging`, `stage`, `DR`, `Sandbox` |
 | `owner_email` | `alice@` … `erin@acme.com`, upper-case and padded variants, unknown users |
-| `cost_center` | `CC100`–`CC400`, `CC999`, lower-case `cc100`, missing |
+| `cost_center` | `CC100`–`CC400`, `CC999`, lower-case `cc100` |
 | `status` | `running`, `stopped`, `terminated`, `suspended`, `pending` |
 | `ram_gb` | Includes fractional `0.5` |
 | `installed_software` | Sometimes lists the same item twice |

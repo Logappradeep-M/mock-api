@@ -204,17 +204,44 @@ test('no admin bypass: management API is open, private API always needs a creden
 test('dataset contains every dirty-data case a client must handle', async () => {
   const { vms: all } = await (await admin('/vms')).json();
   const ipv4 = /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
-  const fam = (v) => (v.guest_os?.family || '').toLowerCase();
+  const fam = (v) => (v.osType || '').toLowerCase();
   assert.ok(all.some((v) => !(v.hostname || '').trim()), 'empty hostname');
   assert.ok(all.some((v) => !ipv4.test(v.ip_address || '')), 'invalid ip');
   assert.ok(all.some((v) => fam(v) === 'windows'), 'windows');
   assert.ok(all.some((v) => fam(v) === 'linux'), 'linux');
-  assert.ok(all.some((v) => !['windows', 'linux'].includes(fam(v))), 'unknown os family');
-  assert.ok(all.some((v) => v.guest_os?.name === 'Win Server 2022'), 'os name variant');
+  assert.ok(all.some((v) => !['windows', 'linux'].includes(fam(v))), 'other os type');
+  assert.ok(all.some((v) => v.osType === 'LINUX' || v.osType === 'windows'), 'os type case variant');
+  assert.ok(all.some((v) => v.osName === 'Win Server 2022'), 'os name variant');
   assert.ok(all.some((v) => !['running', 'stopped'].includes(v.status)), 'unmapped status');
   assert.ok(all.some((v) => v.cpu_manufacturer === 'GenuineIntel'), 'cpu variant');
   assert.ok(all.some((v) => {
     const sw = v.installed_software || [];
     return new Set(sw.map((s) => `${s.name}|${s.version}`)).size < sw.length;
   }), 'duplicate software entry');
+});
+
+test('VM shape: samples match exactly, every generated VM has every field', async () => {
+  const { vms: all } = await (await admin('/vms')).json();
+  const strip = ({ _updated_at, _created_at, ...rest }) => rest;
+  assert.deepEqual(strip(all[0]), {
+    vm_id: 'vm-001', hostname: ' WEB-PROD-01 ', ip_address: '10.10.1.11', cpu_count: 4, ram_gb: 16, disk_gb: 256,
+    environment: 'Production', owner_email: 'alice@acme.com', cost_center: 'CC100', status: 'running',
+    last_seen: '2026-11-18T22:10:00Z', osType: 'Linux', osName: 'ubuntu', osVersion: '24.4',
+    installed_software: [
+      { name: 'nginx', publisher: 'F5', version: '1.24.0', install_date: '2026-03-10' },
+      { name: 'OpenSSL', publisher: 'OpenSSL Project', version: '3.0.2', install_date: '2026-01-05' },
+    ],
+  });
+  assert.equal(all[1].osVersion, '10.0.17763');
+  assert.deepEqual(strip(all[2]), { vm_id: 'vm-003', hostname: 'web-prod-01', ip_address: '10.10.1.11', status: 'running', osType: 'Linux' });
+  assert.deepEqual(strip(all[3]), { vm_id: 'vm-004', hostname: '', ip_address: '999.1.1.1', status: 'running' });
+
+  const fields = ['vm_id', 'hostname', 'ip_address', 'cloud_provider', 'region', 'cpu_count', 'cpu_manufacturer', 'manufacturer',
+    'model', 'ram_gb', 'disk_gb', 'environment', 'owner_email', 'cost_center', 'status', 'last_seen', 'osType', 'osName',
+    'osVersion', 'installed_software'];
+  for (const vm of all.slice(4)) {
+    for (const f of fields) assert.ok(f in vm, `${vm.vm_id} is missing ${f}`);
+    assert.ok(vm.installed_software.length >= 1, `${vm.vm_id} has no software`);
+    assert.ok(!('guest_os' in vm));
+  }
 });

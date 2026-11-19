@@ -161,7 +161,8 @@ describe('end to end', { concurrency: false }, () => {
     assert.equal(new Set(vms.map((v) => v.vm_id)).size, 450);
     const byId = Object.fromEntries(vms.map((v) => [v.vm_id, v]));
     assert.equal(byId['vm-001'].hostname, ' WEB-PROD-01 ');
-    assert.equal(byId['vm-002'].guest_os.family, 'Windows');
+    assert.equal(byId['vm-002'].osType, 'Windows');
+    assert.equal(byId['vm-001'].osVersion, '24.4');
     assert.equal(byId['vm-004'].ip_address, '999.1.1.1');
     assert.ok(vms.every((v) => !Object.keys(v).some((k) => k.startsWith('_'))), 'no internal fields leak');
     ctx.lastSuccessfulRun = spaceDate(ctx.runStart); // job stores this only after a fully successful run
@@ -173,7 +174,7 @@ describe('end to end', { concurrency: false }, () => {
     await sleep(1100);
     // Edit one VM and create one through the UI, and mark two as changed with Test Controls.
     assert.equal((await http('PATCH', '/__admin/data/vms/vm-005', { body: { status: 'stopped', hostname: 'edited-in-ui' } })).status, 200);
-    const created = await http('POST', '/__admin/data/vms', { body: { hostname: 'new-from-ui', ip_address: '10.1.2.3', guest_os: { family: 'Linux' }, status: 'running' } });
+    const created = await http('POST', '/__admin/data/vms', { body: { hostname: 'new-from-ui', ip_address: '10.1.2.3', osType: 'Linux', osName: 'Ubuntu', osVersion: '24.04', status: 'running' } });
     assert.equal(created.status, 201);
     ctx.newVm = created.json.vm_id;
     await http('POST', '/__admin/touch', { body: { vm_ids: ['vm-010', 'vm-020'] } });

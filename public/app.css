@@ -355,3 +355,15 @@ a.btn { text-decoration: none; }
   .grant-row.oauth input[type=text] { grid-column: 1 / -1; grid-row: 2; }
   .grant-head.oauth { display: none; }
 }
+
+/* ---------- API examples ---------- */
+.snippets { display: grid; gap: 12px; }
+.snippet-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.snippet { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.snippet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.snippet-head h3 { font-size: 13px; }
+.snippet-head p { font-size: 12px; margin-top: 2px; }
+.snippet pre.code { border: 0; border-radius: 0; margin: 0; white-space: pre; }
+.snippet-section { display: grid; gap: 12px; }
+.snippet-picker { max-width: 280px; }
+.sheet.wide .snippets pre.code { max-height: 220px; }

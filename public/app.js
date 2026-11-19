@@ -207,6 +207,156 @@ function copyButton(text, label = 'Copy') {
   }, icon('copy'));
 }
 
+// ---------- API examples (copyable curl snippets) ----------
+// Text button that copies and briefly says "Copied".
+function copyTextButton(getText, label = 'Copy') {
+  return h('button', {
+    class: 'btn small', type: 'button', 'aria-label': label,
+    onclick: async (ev) => {
+      const b = ev.currentTarget;
+      try {
+        await navigator.clipboard.writeText(typeof getText === 'function' ? getText() : getText);
+        b.replaceChildren(icon('check'), 'Copied');
+        setTimeout(() => b.replaceChildren(icon('copy'), label), 1400);
+      } catch { toast('Copy isn’t available in this browser.', { error: true }); }
+    },
+  }, icon('copy'), label);
+}
+
+const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // single-quote for the shell
+
+// One record from the collection, to fill in real IDs and field names.
+async function sampleRecord(name) {
+  try { return (await api('GET', `/__admin/data/${encodeURIComponent(name)}?limit=1`))[name]?.[0] || null; } catch { return null; }
+}
+
+// auth: 'none' | 'api_key' | 'basic' | 'oauth'. creds: optional real values to embed.
+function buildSnippets(def, sample, auth, creds = {}) {
+  const base = location.origin;
+  const url = `${base}/api/v1/${def.name}`;
+  const idField = def.id_field;
+  const id = sample?.[idField] ?? '<id>';
+  const idPath = encodeURIComponent(id);
+  const fields = sample ? Object.keys(sample).filter((k) => k !== idField && !k.startsWith('_')) : [];
+  const scalar = fields.filter((k) => ['string', 'number', 'boolean'].includes(typeof sample[k]));
+  const strField = scalar.find((k) => typeof sample[k] === 'string' && sample[k].trim());
+  const filterField = scalar.includes('status') ? 'status' : strField;
+  const filterValue = filterField ? String(sample[filterField]).trim() : '';
+  const sortField = scalar.find((k) => typeof sample[k] === 'number') || scalar[0] || idField;
+  const selectFields = scalar.slice(0, 2).join(',') || idField;
+  const searchWord = strField ? String(sample[strField]).trim().split(/\s+/)[0].toLowerCase() : 'text';
+  const yesterday = new Date(Date.now() - 86400000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  const key = creds.apiKey || '$API_KEY';
+  const user = creds.username || '$USERNAME';
+  const pass = creds.password || '$PASSWORD';
+  const cid = creds.clientId || '$CLIENT_ID';
+  const csec = creds.clientSecret || '$CLIENT_SECRET';
+  const authArg = { none: '', api_key: ` -H "X-API-Key: ${key}"`, basic: ` -u "${user}:${pass}"`, oauth: ' -H "Authorization: Bearer $ACCESS_TOKEN"' }[auth];
+  const get = (q) => `curl -s "${url}${q}"${authArg}`;
+  const json = ' -H "Content-Type: application/json"';
+
+  // Example bodies built from the sample's own fields.
+  const createBody = {};
+  for (const k of scalar.slice(0, 3)) createBody[k] = sample[k];
+  if (!Object.keys(createBody).length) createBody.name = 'Example';
+  const patchField = scalar.find((k) => typeof sample[k] === 'string') || 'name';
+  const patchBody = { [patchField]: 'updated value' };
+
+  const s = [];
+  if (auth === 'oauth') {
+    s.push({
+      title: 'Get an access token',
+      note: `Gives every scope the client has. Add -d scope="${def.name}.read" to narrow it. Then: export ACCESS_TOKEN=<access_token>`,
+      cmd: `curl -s -X POST ${base}/oauth/token -u "${cid}:${csec}" \\\n  -d grant_type=client_credentials`,
+    });
+  }
+  s.push(
+    { title: 'List (first page)', note: 'Returns { page, total_pages, ' + def.name + ': [...] }. page_size is capped at 200.', cmd: get('?page=1&page_size=50') },
+    { title: 'Next page', note: 'Keep increasing page until page equals total_pages.', cmd: get('?page=2&page_size=50') },
+    {
+      title: 'Fetch every page',
+      note: 'Needs jq. Prints each page’s records.',
+      cmd: `page=1\nwhile :; do\n  resp=$(curl -s "${url}?page=$page&page_size=200"${authArg})\n  echo "$resp" | jq '.${def.name}[]'\n  total=$(echo "$resp" | jq .total_pages)\n  [ "$page" -ge "$total" ] && break\n  page=$((page + 1))\ndone`,
+    },
+    { title: 'Limit and skip', note: 'Returns { ' + def.name + ': [...], total, skip, limit }. limit=0 returns up to 1000.', cmd: get('?limit=10&skip=20') },
+    { title: 'Changed since', note: 'Records created or updated at or after this time (ISO 8601 or "YYYY-MM-DD HH:mm:ss").', cmd: get(`?updated_since=${yesterday}&page=1&page_size=200`) },
+    {
+      title: 'Search, filter, sort and select',
+      note: 'q searches the whole record; any other field is an exact-match filter.',
+      cmd: get(`?q=${encodeURIComponent(searchWord)}${filterField ? `&${filterField}=${encodeURIComponent(filterValue)}` : ''}&sortBy=${sortField}&order=desc&select=${selectFields}`),
+    },
+    { title: 'Get one', note: `By ${idField}.`, cmd: get(`/${idPath}`) },
+    { title: 'Create', note: `Leave out ${idField} to have one generated.`, cmd: `curl -s -X POST "${url}"${authArg}${json} \\\n  -d ${shq(JSON.stringify(createBody))}` },
+    { title: 'Update (merge)', note: 'PATCH merges fields; null removes a field.', cmd: `curl -s -X PATCH "${url}/${idPath}"${authArg}${json} \\\n  -d ${shq(JSON.stringify(patchBody))}` },
+    { title: 'Replace', note: 'PUT replaces the whole record.', cmd: `curl -s -X PUT "${url}/${idPath}"${authArg}${json} \\\n  -d ${shq(JSON.stringify({ [idField]: id, ...createBody }))}` },
+    { title: 'Delete', note: '', cmd: `curl -s -X DELETE "${url}/${idPath}"${authArg}` },
+  );
+  return s;
+}
+
+// Panel with auth tabs (for private collections) and one copyable card per snippet.
+function snippetPanel(def, sample, { creds, auth: fixedAuth } = {}) {
+  const wrap = h('div', { class: 'snippets' });
+  let auth = fixedAuth || (def.auth_required ? 'api_key' : 'none');
+  const render = () => {
+    const list = buildSnippets(def, sample, auth, creds);
+    const all = list.map((x) => `# ${x.title}\n${x.cmd}`).join('\n\n');
+    append(clear(wrap), [
+      h('div', { class: 'snippet-bar' },
+        def.auth_required && !fixedAuth
+          ? h('div', { class: 'segmented', role: 'group', 'aria-label': 'Authentication' },
+            [['api_key', 'API Key'], ['basic', 'Basic Auth'], ['oauth', 'OAuth']].map(([v, l]) => h('button', {
+              type: 'button', 'aria-pressed': auth === v ? 'true' : 'false', onclick: () => { auth = v; render(); },
+            }, l)))
+          : h('span', { class: 'secondary' }, def.auth_required ? '' : `${def.name} is public, so no credentials are needed.`),
+        copyTextButton(all, 'Copy All')),
+      def.auth_required && !creds && auth !== 'none'
+        ? h('p', { class: 'secondary' }, 'Replace ', h('code', {}, { api_key: '$API_KEY', basic: '$USERNAME:$PASSWORD', oauth: '$CLIENT_ID / $CLIENT_SECRET' }[auth]),
+          ' with a credential from the ', h('a', { href: `#/credentials/${encodeURIComponent(def.name)}` }, 'Credentials'), ' page. Writes need Write permission.')
+        : null,
+      list.map((x) => h('div', { class: 'snippet' },
+        h('div', { class: 'snippet-head' },
+          h('div', {}, h('h3', {}, x.title), x.note ? h('p', { class: 'tertiary' }, x.note) : null),
+          copyTextButton(x.cmd)),
+        h('pre', { class: 'code' }, x.cmd)))]);
+  };
+  render();
+  return wrap;
+}
+
+// Collection picker + panel, for pages that aren't about one collection.
+async function snippetSection(initial) {
+  const host = h('div', { class: 'snippet-section' });
+  const panelHost = h('div');
+  const pick = initial && S.resources.some((r) => r.name === initial) ? initial : (S.resources.find((r) => r.auth_required) || S.resources[0])?.name;
+  if (!pick) return h('p', { class: 'secondary' }, 'Create a collection to see examples.');
+  const select = h('select', {
+    'aria-label': 'Collection for the examples',
+    onchange: async (ev) => load(ev.target.value),
+  }, S.resources.map((r) => h('option', { value: r.name, selected: r.name === pick ? 'selected' : null }, r.name + (r.auth_required ? '' : ' (public)'))));
+  const load = async (name) => {
+    const def = S.resources.find((r) => r.name === name);
+    clear(panelHost).append(h('p', { class: 'tertiary' }, 'Loading…'));
+    const sample = await sampleRecord(name);
+    clear(panelHost).append(snippetPanel(def, sample));
+  };
+  host.append(h('label', { class: 'field snippet-picker' }, h('span', {}, 'Collection'), select), panelHost);
+  await load(pick);
+  return host;
+}
+
+async function apiExamplesSheet(def) {
+  const sample = S.list.name === def.name && S.list.items[0] ? S.list.items[0] : await sampleRecord(def.name);
+  const clean = sample ? Object.fromEntries(Object.entries(sample).filter(([k]) => !k.startsWith('_'))) : null;
+  return openSheet({
+    title: `Use the ${def.name} API`,
+    subtitle: `${location.origin}/api/v1/${def.name}`,
+    body: snippetPanel(def, clean),
+    submitLabel: 'Done', cancelLabel: null, wide: true,
+  });
+}
+
 // First collection to show: vms if it exists, otherwise the first one.
 const defaultCollection = () => (S.resources.some((r) => r.name === 'vms') ? 'vms' : S.resources[0]?.name || '');
 
@@ -242,6 +392,7 @@ async function showResource(name) {
             icon(def.auth_required ? 'lock' : 'globe'), def.auth_required ? 'Private' : 'Public')),
         h('span', { class: 'endpoint' }, h('span', { class: 'verb' }, 'GET'), h('code', {}, endpoint), copyButton(location.origin + endpoint, 'Copy endpoint URL'))),
       h('label', { class: 'search' }, icon('search'), search),
+      h('button', { class: 'btn', type: 'button', title: 'Copyable curl examples for this collection', onclick: () => apiExamplesSheet(def) }, icon('code'), 'API'),
       h('button', { class: 'btn', type: 'button', onclick: () => importSheet(def) }, 'Import'),
       def.auth_required ? h('a', { class: 'btn', href: `#/credentials/${encodeURIComponent(name)}` }, icon('key'), 'Credentials') : null,
       h('button', { class: 'btn icon', type: 'button', 'aria-label': 'Resource settings', title: 'Resource settings', onclick: () => resourceSettingsSheet(def) }, icon('more')),
@@ -271,7 +422,7 @@ const VM_COLUMNS = [
   { key: 'vm_id', label: 'VM ID', mono: true },
   { key: 'hostname', label: 'Hostname', render: (v) => hostnameCell(v.hostname) },
   { key: 'ip_address', label: 'IP Address', mono: true },
-  { key: 'guest_os.family', label: 'Operating System', render: (v) => osText(v.guest_os) },
+  { key: 'osType', label: 'Operating System', render: (v) => osText(v) },
   { key: 'environment', label: 'Environment' },
   { key: 'status', label: 'Status' },
   { key: '_updated_at', label: 'Updated', render: (v) => h('span', { class: 'tertiary', title: v._updated_at }, relTime(v._updated_at)) },
@@ -365,9 +516,8 @@ function hostnameCell(v) {
   return [m[1] ? h('span', { class: 'ws', title: 'Leading whitespace' }, '␣'.repeat(m[1].length)) : null, m[2],
     m[3] ? h('span', { class: 'ws', title: 'Trailing whitespace' }, '␣'.repeat(m[3].length)) : null];
 }
-function osText(os) {
-  if (!os) return h('span', { class: 'empty-cell' }, '—');
-  const parts = [os.name || os.family, os.version].filter(Boolean);
+function osText(vm) {
+  const parts = [vm.osName || vm.osType, vm.osVersion].filter(Boolean);
   return parts.length ? parts.join(' ') : h('span', { class: 'empty-cell' }, '—');
 }
 
@@ -396,7 +546,7 @@ async function newRecord(seed) {
         hostname: 'new-vm-01', ip_address: '10.0.0.10', cloud_provider: 'aws', region: 'us-east-1',
         cpu_count: 2, ram_gb: 4, disk_gb: 64, environment: 'Development', status: 'running',
         last_seen: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-        guest_os: { family: 'Linux', name: 'Ubuntu', version: '22.04' }, installed_software: [],
+        osType: 'Linux', osName: 'Ubuntu', osVersion: '24.04', installed_software: [],
       }
       : {};
   }
@@ -465,7 +615,7 @@ function refreshInspectorState() {
   $('#dirty-note').textContent = I.jsonError ? 'Fix the JSON to save' : I.dirty && !I.isNew ? 'Edited' : '';
 }
 
-// Path helpers ("guest_os.family", "installed_software.0.name")
+// Path helpers ("osType", "installed_software.0.name")
 function getPath(obj, path) {
   return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
 }
@@ -481,8 +631,6 @@ function setPath(obj, path, value) {
   if (value === undefined) {
     if (Array.isArray(o)) o[last] = undefined; else delete o[last];
   } else o[last] = value;
-  // Drop now-empty parent objects so "missing" really is missing in the payload.
-  if (keys[0] === 'guest_os' && obj.guest_os && !Object.keys(obj.guest_os).length) delete obj.guest_os;
 }
 
 function input(path, { label, type = 'text', mono = false, hint, list, placeholder, step } = {}) {
@@ -513,7 +661,7 @@ function datalist(id, options) {
 function vmForm() {
   const I = S.insp;
   const wrap = h('div', { class: 'insp-form', id: 'vm-form' },
-    datalist('dl-family', ['Linux', 'Windows']),
+    datalist('dl-ostype', ['Linux', 'Windows', 'FreeBSD', 'Solaris', 'Other']),
     datalist('dl-status', ['running', 'stopped', 'terminated', 'suspended']),
     datalist('dl-env', ['Production', 'Development', 'QA', 'Test', 'UAT', 'Staging']),
     datalist('dl-provider', ['aws', 'azure', 'gcp', 'vmware']),
@@ -524,13 +672,11 @@ function vmForm() {
       input('vm_id', { label: 'VM ID', mono: true, hint: I.isNew ? 'Leave blank to generate one.' : 'The unique ID for this VM.' }),
       input('hostname', { label: 'Hostname', mono: true, hint: 'Leading or trailing spaces are kept, so you can test trimming.' }),
       input('ip_address', { label: 'IP Address', mono: true })),
-    h('div', { class: 'fieldset' }, h('h3', {}, 'Guest OS'),
-      h('div', { class: 'row2' },
-        input('guest_os.family', { label: 'Family', list: 'dl-family' }),
-        input('guest_os.name', { label: 'Name' })),
-      h('div', { class: 'row2' },
-        input('guest_os.version', { label: 'Version' }),
-        input('guest_os.kernel', { label: 'Kernel', mono: true }))),
+    h('div', { class: 'fieldset' }, h('h3', {}, 'Operating System'),
+      h('div', { class: 'row3' },
+        input('osType', { label: 'Type', list: 'dl-ostype' }),
+        input('osName', { label: 'Name' }),
+        input('osVersion', { label: 'Version' }))),
     h('div', { class: 'fieldset' }, h('h3', {}, 'Hardware'),
       h('div', { class: 'row3' },
         input('cpu_count', { label: 'CPUs', type: 'number', step: '1' }),
@@ -935,19 +1081,12 @@ async function renderCredentials(collection) {
       h('thead', {}, h('tr', {}, ['Name', 'Identifier', 'Access', 'Expires', 'Enabled', 'Last Used', ''].map((t) => h('th', { class: 'static', scope: 'col' }, t)))),
       h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '7', class: 'empty-cell' }, 'No credentials match these filters')))))));
 
+  const examples = h('div', {}, h('p', { class: 'tertiary' }, 'Loading…'));
   page.append(h('section', { class: 'card' },
     h('h2', {}, 'How Callers Use Them'),
-    h('pre', { class: 'code' }, `# API key
-curl -s "${location.origin}/api/v1/<collection>" -H "X-API-Key: $API_KEY"
-
-# Basic auth
-curl -s "${location.origin}/api/v1/<collection>" -u "$USERNAME:$PASSWORD"
-
-# OAuth client (leave out scope to get every scope the client has)
-curl -s -X POST ${location.origin}/oauth/token -u "$CLIENT_ID:$CLIENT_SECRET" \\
-  -d grant_type=client_credentials -d scope="<collection>.read"
-curl -s "${location.origin}/api/v1/<collection>" -H "Authorization: Bearer $ACCESS_TOKEN"`),
-    h('p', { class: 'secondary' }, 'Credentials only apply to private collections. Disabling, editing access, rotating or revoking takes effect immediately and cancels existing OAuth tokens.')));
+    h('p', { class: 'secondary' }, 'Credentials only apply to private collections. Disabling, editing access, rotating or revoking takes effect immediately and cancels existing OAuth tokens.'),
+    examples));
+  examples.replaceChildren(await snippetSection(collection));
 }
 
 // Grants editor: rows of collection + permissions (+ scope name for OAuth).
@@ -1085,9 +1224,13 @@ function secretField(label, value) {
       copyButton(value, `Copy ${label.toLowerCase()}`)));
 }
 
-function showSecret(cred, secret, verb) {
+async function showSecret(cred, secret, verb) {
   const base = location.origin;
   let body;
+  // Examples for the first collection this credential can reach, with the real secret filled in.
+  const target = cred.grants.find((g) => g.resource !== '*')?.resource || (S.resources.find((r) => r.auth_required) || S.resources[0])?.name;
+  const tdef = S.resources.find((r) => r.name === target);
+  const tsample = tdef ? await sampleRecord(tdef.name) : null;
   if (cred.type === 'api_key') {
     body = [secretField('API Key', secret), secretField('Header', `X-API-Key: ${secret}`)];
   } else if (cred.type === 'basic') {
@@ -1096,6 +1239,14 @@ function showSecret(cred, secret, verb) {
   } else {
     body = [secretField('Client ID', cred.client_id), secretField('Client Secret', secret), secretField('Token URL', `${base}/oauth/token`),
       h('p', { class: 'secondary' }, 'Scopes: ', cred.scopes.flatMap((sc, i) => [i ? ' ' : '', h('code', {}, sc)]))];
+  }
+  if (tdef) {
+    const creds = cred.type === 'api_key' ? { apiKey: secret }
+      : cred.type === 'basic' ? { username: cred.username, password: secret }
+        : { clientId: cred.client_id, clientSecret: secret };
+    const auth = { api_key: 'api_key', basic: 'basic', oauth_client: 'oauth' }[cred.type];
+    body.push(h('div', { class: 'field' }, h('span', {}, `Ready-to-run examples for ${tdef.name}`),
+      snippetPanel({ ...tdef, auth_required: true }, tsample, { creds, auth })));
   }
   return openSheet({
     title: `${verb} ${TYPE_INFO[cred.type].label}`,
@@ -1134,14 +1285,7 @@ function showConnection() {
   const tokenUrl = base + o.token_path;
 
   const kvRow = (k, v, copy) => [h('dt', {}, k), h('dd', {}, v, copy ? copyButton(copy, `Copy ${k}`) : null)];
-  const curl = `# 1. Get a token with an OAuth client from the Credentials page
-curl -s -X POST ${tokenUrl} \\
-  -u "$CLIENT_ID:$CLIENT_SECRET" \\
-  -d grant_type=client_credentials -d scope=vms.read
-
-# 2. Call the API
-curl -s "${base}/api/v1/vms?updated_since=2026-11-18T00:00:00Z&page=1&page_size=200" \\
-  -H "Authorization: Bearer $ACCESS_TOKEN"`;
+  const examples = h('div', {}, h('p', { class: 'tertiary' }, 'Loading…'));
 
   main.append(
     h('header', { class: 'toolbar' }, sidebarButton(), h('div', { class: 'title' }, h('h1', {}, 'Connection'),
@@ -1174,8 +1318,9 @@ curl -s "${base}/api/v1/vms?updated_since=2026-11-18T00:00:00Z&page=1&page_size=
           h('code', {}, 'delay'), ', and any field, such as ', h('code', {}, 'status=running'), '. Private collections accept an ',
           h('code', {}, 'X-API-Key'), ' header, Basic credentials or a Bearer token. Create them on the ', h('a', { href: '#/credentials' }, 'Credentials'), ' page.')),
       h('section', { class: 'card' },
-        h('div', { class: 'card-head' }, h('h2', {}, 'Try It'), copyButton(curl, 'Copy commands')),
-        h('pre', { class: 'code' }, curl))));
+        h('h2', {}, 'Try It'),
+        examples)));
+  snippetSection().then((el) => examples.replaceChildren(el));
 }
 
 // ---------- Test controls ----------
