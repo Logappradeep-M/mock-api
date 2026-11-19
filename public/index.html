@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Mock API Studio</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <nav id="sidebar" class="sidebar" aria-label="Sections">
+      <div class="sidebar-head">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#i-stack"/></svg>
+        <span class="brand">Mock API Studio</span>
+      </div>
+      <div class="side-group">
+        <div class="side-label" id="lbl-resources">Resources</div>
+        <ul id="resource-list" class="side-list" aria-labelledby="lbl-resources"></ul>
+        <button id="new-resource" class="side-add" type="button">
+          <svg aria-hidden="true"><use href="#i-plus"/></svg>New Resource
+        </button>
+      </div>
+      <div class="side-group">
+        <div class="side-label" id="lbl-integration">Integration</div>
+        <ul class="side-list" aria-labelledby="lbl-integration">
+          <li><a href="#/credentials" data-nav="credentials"><svg aria-hidden="true"><use href="#i-key"/></svg>Credentials</a></li>
+          <li><a href="#/connection" data-nav="connection"><svg aria-hidden="true"><use href="#i-globe"/></svg>Connection</a></li>
+          <li><a href="#/controls" data-nav="controls"><svg aria-hidden="true"><use href="#i-bolt"/></svg>Test Controls</a></li>
+          <li><a href="#/log" data-nav="log"><svg aria-hidden="true"><use href="#i-list"/></svg>Request Log</a></li>
+        </ul>
+      </div>
+      <div class="sidebar-foot">
+        <span id="storage-badge" class="storage"></span>
+      </div>
+    </nav>
+
+    <section id="main" class="main" aria-live="polite"></section>
+
+    <aside id="inspector" class="inspector" aria-label="Record editor" hidden></aside>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+  <!-- Sheets -->
+  <dialog id="sheet" class="sheet"></dialog>
+
+  <!-- Icons (inline symbols, 16px grid, 1.5 stroke) -->
+  <svg width="0" height="0" class="sprite" aria-hidden="true">
+    <symbol id="i-stack" viewBox="0 0 32 32"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M16 4 4 10l12 6 12-6z"/><path d="m4 16 12 6 12-6"/><path d="m4 22 12 6 12-6"/></g></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></symbol>
+    <symbol id="i-key" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="5" cy="8" r="2.75"/><path d="M7.75 8H14m-2 0v2.5M14 8v2"/></g></symbol>
+    <symbol id="i-bolt" viewBox="0 0 16 16"><path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="i-list" viewBox="0 0 16 16"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.5" cy="4" r=".6"/><circle cx="2.5" cy="8" r=".6"/><circle cx="2.5" cy="12" r=".6"/></g></symbol>
+    <symbol id="i-server" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="4.5" rx="1.2"/><rect x="2" y="9" width="12" height="4.5" rx="1.2"/></g><circle cx="4.75" cy="4.75" r=".9" fill="currentColor"/><circle cx="4.75" cy="11.25" r=".9" fill="currentColor"/></symbol>
+    <symbol id="i-table" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M6.5 6.5v7"/></g></symbol>
+    <symbol id="i-lock" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></g></symbol>
+    <symbol id="i-globe" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12"/></g></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3.25 3.25"/></g></symbol>
+    <symbol id="i-close" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></g></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m5.75 5.75 4.5 4.5m0-4.5-4.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 2 1.75 13.25h12.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5v3.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.6" r=".8" fill="currentColor"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3 8h9.5M9 4.5 12.5 8 9 11.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-more" viewBox="0 0 16 16"><g fill="currentColor"><circle cx="3.5" cy="8" r="1.25"/><circle cx="8" cy="8" r="1.25"/><circle cx="12.5" cy="8" r="1.25"/></g></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.75"/><path d="M6 2.75v10.5"/></g></symbol>
+    <symbol id="i-chev-l" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
