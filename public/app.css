@@ -369,3 +369,28 @@ a.btn { text-decoration: none; }
 .sheet.wide .snippets pre.code { max-height: 220px; }
 .sw-cell { display: inline-flex; align-items: center; gap: 6px; }
 .sw-count { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; text-align: center; }
+
+/* Scrolling grids: size rows to their content. Without this, a row whose card
+   clips its content (overflow: hidden) can collapse to zero height once the page
+   is taller than the window. */
+.page, .insp-body, .sheet-body { grid-auto-rows: max-content; }
+
+.empty-card { justify-items: center; text-align: center; padding: 32px 16px; }
+.empty-card > svg { width: 28px; height: 28px; color: var(--text-3); }
+
+/* Credentials on narrow screens: one stacked card per credential. */
+@media (max-width: 760px) {
+  .card.flush .table-scroll { overflow: visible; }
+  .grid.creds, .grid.creds tbody { display: block; }
+  .grid.creds thead { display: none; }
+  .grid.creds tbody tr { display: grid; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .grid.creds tbody tr:last-child { border-bottom: 0; }
+  .grid.creds tbody tr:nth-child(even) td { background: transparent; }
+  .grid.creds td { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0; border: 0; white-space: normal; }
+  .grid.creds td[data-label]::before { content: attr(data-label); font-size: 12px; color: var(--text-2); flex: none; }
+  .grid.creds td.cell-name { font-size: 14px; }
+  .grid.creds td.cell-actions { justify-content: flex-start; padding-top: 4px; }
+  .grid.creds .row-actions { flex-wrap: wrap; }
+  .grid.creds .chips { justify-content: flex-end; max-width: none; }
+  .grid.creds code { overflow-wrap: anywhere; }
+}

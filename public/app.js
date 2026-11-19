@@ -1072,22 +1072,42 @@ async function renderCredentials(collection) {
     }));
 
   const rows = creds.map((c) => h('tr', { class: c.disabled || c.expired ? 'muted' : null },
-    h('td', {}, h('div', { class: 'cred-name' }, h('span', {}, c.label), h('span', { class: `type-badge t-${c.type}` }, TYPE_INFO[c.type].short))),
-    h('td', {}, idCell(c)),
-    h('td', {}, accessCell(c)),
-    h('td', {}, expiresCell(c)),
-    h('td', {}, enabledCell(c)),
-    h('td', {}, h('span', { class: 'tertiary', title: c.last_used_at || 'Never used' }, c.last_used_at ? relTime(c.last_used_at) : 'Never')),
-    h('td', {}, h('div', { class: 'row-actions' },
+    h('td', { class: 'cell-name' }, h('div', { class: 'cred-name' }, h('span', {}, c.label), h('span', { class: `type-badge t-${c.type}` }, TYPE_INFO[c.type].short))),
+    h('td', { 'data-label': 'Identifier' }, idCell(c)),
+    h('td', { 'data-label': 'Access' }, accessCell(c)),
+    h('td', { 'data-label': 'Expires' }, expiresCell(c)),
+    h('td', { 'data-label': 'Enabled' }, enabledCell(c)),
+    h('td', { 'data-label': 'Last used' }, h('span', { class: 'tertiary', title: c.last_used_at || 'Never used' }, c.last_used_at ? relTime(c.last_used_at) : 'Never')),
+    h('td', { class: 'cell-actions' }, h('div', { class: 'row-actions' },
       h('button', { class: 'btn small', type: 'button', onclick: () => editCredential(c, collection) }, 'Edit…'),
       h('button', { class: 'btn small', type: 'button', onclick: () => rotateCredential(c, collection) }, 'Rotate…'),
       h('button', { class: 'btn small danger', type: 'button', onclick: () => revokeCredential(c, collection) }, 'Revoke…')))));
 
 
-  page.append(h('section', { class: 'card flush' },
-    h('div', { class: 'table-scroll' }, h('table', { class: 'grid creds' },
-      h('thead', {}, h('tr', {}, ['Name', 'Identifier', 'Access', 'Expires', 'Enabled', 'Last Used', ''].map((t) => h('th', { class: 'static', scope: 'col' }, t)))),
-      h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '7', class: 'empty-cell' }, 'No credentials match these filters')))))));
+  const filtered = credFilter.type !== 'all' || !!collection;
+  if (!rows.length) {
+    // Empty state: invite the next step instead of showing an empty table.
+    page.append(h('section', { class: 'card empty-card' },
+      icon('key'),
+      h('h2', {}, data.credentials.length ? 'No credentials match these filters' : 'No credentials yet'),
+      h('p', { class: 'secondary' }, data.credentials.length
+        ? 'Try another type or collection.'
+        : 'Create an API key, Basic login or OAuth client to give callers access to private collections.'),
+      h('div', { class: 'row-actions' },
+        h('button', { class: 'btn primary', type: 'button', onclick: () => editCredential(null, collection) }, icon('plus'), 'New Credential'),
+        filtered && data.credentials.length ? h('button', {
+          class: 'btn', type: 'button',
+          onclick: () => {
+            credFilter.type = 'all';
+            if (location.hash === '#/credentials') showCredentials(''); else location.hash = '#/credentials';
+          },
+        }, 'Show All') : null)));
+  } else {
+    page.append(h('section', { class: 'card flush' },
+      h('div', { class: 'table-scroll' }, h('table', { class: 'grid creds' },
+        h('thead', {}, h('tr', {}, ['Name', 'Identifier', 'Access', 'Expires', 'Enabled', 'Last Used', ''].map((t) => h('th', { class: 'static', scope: 'col' }, t)))),
+        h('tbody', {}, rows)))));
+  }
 
   const examples = h('div', {}, h('p', { class: 'tertiary' }, 'Loading…'));
   page.append(h('section', { class: 'card' },
